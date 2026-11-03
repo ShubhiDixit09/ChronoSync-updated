@@ -1,7 +1,9 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  // Next.js builds on Vercel must not typecheck Cloudflare Worker-only modules.
+  // The ordinary local/vinext build still uses tsconfig.json unchanged.
+  ...(process.env.VERCEL ? { typescript: { tsconfigPath: "tsconfig.vercel.json" } } : {}),
 };
 
 export default nextConfig;
