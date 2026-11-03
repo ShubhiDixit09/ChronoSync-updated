@@ -1,5 +1,12 @@
 # ChronoSync
 
+<!-- LIVE DEPLOYMENT LINK -->
+
+[**Open live ChronoSync**](https://chronosync-shubhidixit09.vercel.app/)
+
+**Deployment:** Vercel · Next.js interface and deployed FastAPI timetable optimizer. The sample-dataset Generate timetable workflow has been tested end-to-end.
+<!-- END LIVE DEPLOYMENT LINK -->
+
 ChronoSync is an institution-independent university timetable generation and
 optimisation platform. It converts courses, faculty availability, rooms,
 student groups, institutional rules and human preferences into a clash-free,
