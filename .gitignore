@@ -42,3 +42,13 @@ next-env.d.ts
 /.vinext/
 /outputs/
 /work/
+
+# python
+__pycache__/
+*.py[cod]
+$py.class
+.pytest_cache/
+.venv/
+venv/
+
+*.tsbuildinfo
