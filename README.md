@@ -17,20 +17,31 @@ but is deliberately not hard-coded to one state, university or department.
 
 ## What is working
 
-- Responsive academic-operations frontend with schedule, course, faculty, room
-  and constraint workspaces.
-- FastAPI backend with typed validation and interactive OpenAPI docs.
-- Real hybrid scheduler:
-  - most-constrained-first initialisation;
-  - tournament selection and elitism;
-  - student-group-aware crossover;
-  - adaptive mutation;
-  - feasibility repair;
-  - Tabu Search local refinement;
-  - lexicographic hard/soft constraint scoring;
-  - fitness caching and seeded reproducibility.
-- Live generation progress, API-connected/demo states, filters and metrics.
-- Sample university dataset, API tests, Docker setup and source papers.
+- **Dual-Engine Hybrid Genetic Algorithm**:
+  - **In-Browser TypeScript Engine**: Solves the scheduling problem directly in the browser with 0 external setup needed.
+  - **FastAPI Python Backend**: Scalable Python backend with typed validation, locked session support, and interactive OpenAPI docs.
+  - Seeding with most-constrained-first heuristics (rare rooms, long labs).
+  - Elitism and tournament selection.
+  - Student-group-aware crossover and adaptive mutation.
+  - Feasibility repair operator that relocates invalid offspring into feasible slots.
+  - Tabu Search local refinement.
+  - Lexicographic hard and soft constraint scoring.
+- **Interactive Academic Data Management**:
+  - Full CRUD modals for **Courses**, **Faculty Members**, and **Rooms**.
+  - Custom colors, room types (lecture/lab), capacities, and preferred teaching slots.
+  - Automatic `localStorage` persistence and one-click demo data reset.
+- **Multi-Perspective Timetable Views**:
+  - **Section / Student Group View**: Filter by whole cohort or specific section (CSE-A, CSE-B).
+  - **Faculty View**: View any teacher's weekly schedule with workload tracking.
+  - **Room View**: Monitor hall/lab room occupancy.
+- **Interactive Session Management**:
+  - Click any timetable session to inspect details.
+  - **Session Locking**: Pin approved sessions so re-generation never moves them.
+  - **Manual Rescheduling**: Move sessions to new days/slots/rooms with instant clash detection.
+- **Diagnostics & Data Interchange**:
+  - **Pre-flight Feasibility Diagnostics**: Check capacity vs. demand before running the solver.
+  - **Exporting**: Export to CSV (Excel), JSON, and Print / PDF view.
+  - **Importing**: Import courses from CSV with built-in template assistance.
 
 ## One-command start
 

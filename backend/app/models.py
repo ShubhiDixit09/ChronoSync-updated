@@ -46,6 +46,13 @@ class OptimizerConfig(BaseModel):
     seed: int = 42
 
 
+class LockedSession(BaseModel):
+    session_id: str
+    day: str
+    slot_id: str
+    room_id: str
+
+
 class ScheduleRequest(BaseModel):
     institution: str = "Demo University"
     term: str = "Odd 2026"
@@ -54,6 +61,7 @@ class ScheduleRequest(BaseModel):
     rooms: list[Room]
     faculty: list[Faculty]
     courses: list[Course]
+    locked_sessions: list[LockedSession] = Field(default_factory=list)
     config: OptimizerConfig = Field(default_factory=OptimizerConfig)
 
     @model_validator(mode="after")
@@ -85,6 +93,7 @@ class ScheduledSession(BaseModel):
     room_name: str
     duration_slots: int
     color: str
+    is_locked: bool = False
 
 
 class ScheduleMetrics(BaseModel):

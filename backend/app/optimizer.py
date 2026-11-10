@@ -37,8 +37,24 @@ class HybridScheduler:
             for index, course in enumerate(request.courses)
             for number in range(course.weekly_sessions)
         ]
+        self.locked_placements: dict[int, Placement] = {}
+        locked_map = {item.session_id: item for item in request.locked_sessions}
+        for index, session in enumerate(self.sessions):
+            if session.id in locked_map:
+                lock = locked_map[session.id]
+                try:
+                    day_idx = request.days.index(lock.day)
+                    slot_idx = next(i for i, s in enumerate(request.slots) if s.id == lock.slot_id)
+                    room_idx = next(i for i, r in enumerate(request.rooms) if r.id == lock.room_id)
+                    self.locked_placements[index] = (day_idx, slot_idx, room_idx)
+                except (ValueError, StopIteration):
+                    pass
+
         self.possible = {
-            index: self._static_placements(index) for index in range(len(self.sessions))
+            index: [self.locked_placements[index]]
+            if index in self.locked_placements
+            else self._static_placements(index)
+            for index in range(len(self.sessions))
         }
         self.cache: dict[tuple[Placement | None, ...], tuple[int, float]] = {}
 
@@ -118,8 +134,11 @@ class HybridScheduler:
 
     def _seed_candidate(self) -> Chromosome:
         chromosome: Chromosome = [None] * len(self.sessions)
+        for index, placement in self.locked_placements.items():
+            chromosome[index] = placement
+
         order = sorted(
-            range(len(self.sessions)),
+            [i for i in range(len(self.sessions)) if i not in self.locked_placements],
             key=lambda index: (
                 len(self.possible[index]),
                 -self._course(index).duration_slots,
@@ -158,15 +177,24 @@ class HybridScheduler:
                 buckets[key].append(index)
         for indexes in buckets.values():
             if len(indexes) > 1:
-                conflicts.update(indexes[1:])
+                # If one is locked, retain it and conflict the others
+                unlocked = [idx for idx in indexes if idx not in self.locked_placements]
+                if len(unlocked) == len(indexes):
+                    conflicts.update(indexes[1:])
+                else:
+                    conflicts.update(unlocked)
         return conflicts
 
     def repair(self, chromosome: Chromosome) -> Chromosome:
         repaired = copy.deepcopy(chromosome)
         conflicts = self._conflicting_indexes(repaired)
         for index in conflicts:
-            repaired[index] = None
-        for index in sorted(conflicts, key=lambda item: len(self.possible[item])):
+            if index not in self.locked_placements:
+                repaired[index] = None
+        for index in sorted(
+            [c for c in conflicts if c not in self.locked_placements],
+            key=lambda item: len(self.possible[item]),
+        ):
             choices = self.possible[index][:]
             self.rng.shuffle(choices)
             feasible = [
@@ -247,6 +275,9 @@ class HybridScheduler:
         }
         child: Chromosome = []
         for index in range(len(self.sessions)):
+            if index in self.locked_placements:
+                child.append(self.locked_placements[index])
+                continue
             course = self._course(index)
             child.append((left if group_source[course.group_id] == 0 else right)[index])
         return self.repair(child)
@@ -254,6 +285,8 @@ class HybridScheduler:
     def _mutate(self, chromosome: Chromosome, rate: float) -> Chromosome:
         mutated = copy.deepcopy(chromosome)
         for index in range(len(mutated)):
+            if index in self.locked_placements:
+                continue
             if self.rng.random() >= rate or not self.possible[index]:
                 continue
             choices = self.possible[index][:]
@@ -277,7 +310,7 @@ class HybridScheduler:
             candidates: list[tuple[tuple[int, float], int, Placement, Chromosome]] = []
             for _ in range(min(60, len(self.sessions) * 5)):
                 index = self.rng.randrange(len(self.sessions))
-                if not self.possible[index]:
+                if index in self.locked_placements or not self.possible[index]:
                     continue
                 placement = self.rng.choice(self.possible[index])
                 neighbor = copy.deepcopy(current)
@@ -355,6 +388,7 @@ class HybridScheduler:
                     room_name=self.request.rooms[room_index].name,
                     duration_slots=course.duration_slots,
                     color=course.color,
+                    is_locked=index in self.locked_placements,
                 )
             )
         occupied_room_slots = sum(item.duration_slots for item in scheduled)
