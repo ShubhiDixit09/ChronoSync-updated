@@ -19,7 +19,7 @@ export type Faculty = {
   preferred_slots: string[];
   unavailable_slots: string[];
   max_daily_sessions: number;
-  tone: "blue" | "amber" | "rose" | "sage" | "violet";
+  tone: "blue" | "amber" | "rose" | "sage" | "violet" | "sand";
 };
 
 export type Course = {

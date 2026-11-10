@@ -40,6 +40,7 @@ import {
   Users,
   WandSparkles,
   X,
+  Layers,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -50,6 +51,8 @@ import {
   DEFAULT_FACULTY,
   DEFAULT_ROOMS,
   DEFAULT_SLOTS,
+  PRESET_TEMPLATES,
+  TimetableTemplate,
 } from "./lib/initialData";
 import { ClientScheduler, validateCapacity } from "./lib/optimizer";
 import {
@@ -71,6 +74,24 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v
 export default function Home() {
   const [view, setView] = useState<View>("schedule");
   const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  // Institution & Term metadata
+  const [institutionName, setInstitutionName] = useState(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem("chronosync_inst_name") || "Northbridge Institute of Technology";
+    }
+    return "Northbridge Institute of Technology";
+  });
+
+  const [termName, setTermName] = useState(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem("chronosync_term_name") || "Odd 2026";
+    }
+    return "Odd 2026";
+  });
+
+  const [isEditingInstName, setEditingInstName] = useState(false);
+  const [isEditingTermName, setEditingTermName] = useState(false);
 
   // Core entities state
   const [courses, setCourses] = useState<Course[]>(() => {
@@ -152,8 +173,8 @@ export default function Home() {
   const [result, setResult] = useState<ScheduleResponse>(() => {
     const lockedMap = new Map<string, { day: string; slot_id: string; room_id: string }>();
     const scheduler = new ClientScheduler(
-      "Northbridge Institute of Technology",
-      "Odd 2026",
+      institutionName,
+      termName,
       DEFAULT_DAYS,
       DEFAULT_SLOTS,
       DEFAULT_ROOMS,
@@ -199,8 +220,17 @@ export default function Home() {
   const [csvInput, setCsvInput] = useState("");
 
   const [isSettingsModalOpen, setSettingsModalOpen] = useState(false);
+  const [isWizardModalOpen, setWizardModalOpen] = useState(false);
 
   // Sync to local storage
+  useEffect(() => {
+    localStorage.setItem("chronosync_inst_name", institutionName);
+  }, [institutionName]);
+
+  useEffect(() => {
+    localStorage.setItem("chronosync_term_name", termName);
+  }, [termName]);
+
   useEffect(() => {
     localStorage.setItem("chronosync_courses", JSON.stringify(courses));
   }, [courses]);
@@ -306,8 +336,8 @@ export default function Home() {
 
       if (engine === "api" && connection === "live") {
         const payload = {
-          institution: "Northbridge Institute of Technology",
-          term: "Odd 2026",
+          institution: institutionName,
+          term: termName,
           days: DEFAULT_DAYS,
           slots: DEFAULT_SLOTS,
           rooms,
@@ -330,19 +360,18 @@ export default function Home() {
 
         if (!res.ok) throw new Error("API failed");
         const apiData = await res.json();
-        // Update locked status from local locked map
         apiData.sessions = apiData.sessions.map((s: ScheduledSession) => ({
           ...s,
           is_locked: !!lockedSessions[s.session_id],
         }));
         setResult(apiData);
-        setNotice("Generated with FastAPI Hybrid Optimizer (0 hard clashes).");
+        setNotice(`Generated with FastAPI Hybrid Optimizer (${apiData.metrics.hard_conflicts} clashes).`);
       } else {
         // Run Client TypeScript Genetic Algorithm
         await new Promise((resolve) => setTimeout(resolve, 350));
         const scheduler = new ClientScheduler(
-          "Northbridge Institute of Technology",
-          "Odd 2026",
+          institutionName,
+          termName,
           DEFAULT_DAYS,
           DEFAULT_SLOTS,
           rooms,
@@ -358,14 +387,14 @@ export default function Home() {
           `Schedule generated in ${clientResult.run.execution_ms}ms using client-side Genetic Algorithm (${clientResult.metrics.hard_conflicts} clashes).`,
         );
       }
-    } catch (err: any) {
+    } catch {
       // Fallback to client scheduler
       const lockedMap = new Map<string, { day: string; slot_id: string; room_id: string }>();
       Object.entries(lockedSessions).forEach(([k, v]) => lockedMap.set(k, v));
 
       const scheduler = new ClientScheduler(
-        "Northbridge Institute of Technology",
-        "Odd 2026",
+        institutionName,
+        termName,
         DEFAULT_DAYS,
         DEFAULT_SLOTS,
         rooms,
@@ -377,7 +406,7 @@ export default function Home() {
       );
       const clientResult = scheduler.run();
       setResult(clientResult);
-      setNotice("API connection failed. Ran in-browser Genetic Algorithm successfully.");
+      setNotice("Executed in-browser Genetic Algorithm successfully.");
     } finally {
       window.clearInterval(progressTimer);
       setProgress(100);
@@ -392,31 +421,29 @@ export default function Home() {
     setDiagnosticsModalOpen(true);
   }
 
-  // Reset to default sample
-  function handleResetToDefaults() {
-    if (confirm("Reset all courses, faculty, rooms, constraints, and locked sessions to default?")) {
-      setCourses(DEFAULT_COURSES);
-      setFaculty(DEFAULT_FACULTY);
-      setRooms(DEFAULT_ROOMS);
-      setConstraints(DEFAULT_CONSTRAINTS);
-      setConfig(DEFAULT_CONFIG);
-      setLockedSessions({});
-      localStorage.clear();
+  // Apply a template
+  function handleApplyTemplate(template: TimetableTemplate) {
+    setInstitutionName(template.institution);
+    setTermName(template.term);
+    setCourses(template.courses);
+    setFaculty(template.faculty);
+    setRooms(template.rooms);
+    setLockedSessions({});
 
-      const scheduler = new ClientScheduler(
-        "Northbridge Institute of Technology",
-        "Odd 2026",
-        DEFAULT_DAYS,
-        DEFAULT_SLOTS,
-        DEFAULT_ROOMS,
-        DEFAULT_FACULTY,
-        DEFAULT_COURSES,
-        DEFAULT_CONSTRAINTS,
-        DEFAULT_CONFIG,
-      );
-      setResult(scheduler.run());
-      setNotice("Restored to clean demo institution dataset.");
-    }
+    const scheduler = new ClientScheduler(
+      template.institution,
+      template.term,
+      DEFAULT_DAYS,
+      DEFAULT_SLOTS,
+      template.rooms,
+      template.faculty,
+      template.courses,
+      constraints,
+      config,
+    );
+    setResult(scheduler.run());
+    setWizardModalOpen(false);
+    setNotice(`Loaded '${template.name}' with ${template.courses.length} subjects & ${template.faculty.length} teachers.`);
   }
 
   // Export handlers
@@ -448,11 +475,13 @@ export default function Home() {
       s.is_locked ? "Yes" : "No",
     ]);
 
-    const csvContent = "data:text/csv;charset=utf-8," + [headers.join(","), ...rows.map((e) => e.join(","))].join("\n");
+    const csvContent =
+      "data:text/csv;charset=utf-8," +
+      [headers.join(","), ...rows.map((e) => e.join(","))].join("\n");
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement("a");
     link.setAttribute("href", encodedUri);
-    link.setAttribute("download", `chronosync-timetable-${new Date().toISOString().slice(0, 10)}.csv`);
+    link.setAttribute("download", `chronosync-${institutionName.toLowerCase().replace(/\s+/g, "-")}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -461,8 +490,8 @@ export default function Home() {
   function handleExportJSON() {
     setExportDropdownOpen(false);
     const data = {
-      institution: "Northbridge Institute of Technology",
-      term: "Odd 2026",
+      institution: institutionName,
+      term: termName,
       generated_at: new Date().toISOString(),
       metrics: result.metrics,
       sessions: result.sessions,
@@ -471,7 +500,7 @@ export default function Home() {
     const jsonStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(data, null, 2));
     const link = document.createElement("a");
     link.setAttribute("href", jsonStr);
-    link.setAttribute("download", `chronosync-schedule-${new Date().toISOString().slice(0, 10)}.json`);
+    link.setAttribute("download", `chronosync-timetable.json`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -500,7 +529,6 @@ export default function Home() {
       return next;
     });
 
-    // Update in current results
     setResult((prev) => ({
       ...prev,
       sessions: prev.sessions.map((s) =>
@@ -513,40 +541,99 @@ export default function Home() {
     }
   }
 
-  // Reschedule session manually
-  function handleManualReschedule(newDay: string, newSlotId: string, newRoomId: string) {
-    if (!selectedSession) return;
+  // Direct In-Place Edit from Session Modal
+  function handleUpdateSessionDetails(
+    sessionId: string,
+    updatedCourseName: string,
+    updatedFacultyName: string,
+    updatedGroupId: string,
+    newDay: string,
+    newSlotId: string,
+    newRoomId: string,
+  ) {
+    const session = result.sessions.find((s) => s.session_id === sessionId);
+    if (!session) return;
 
+    // 1. Update or create faculty if teacher name was changed
+    let activeFacultyId = session.faculty_id;
+    const existingFaculty = faculty.find(
+      (f) => f.name.toLowerCase() === updatedFacultyName.trim().toLowerCase(),
+    );
+
+    if (existingFaculty) {
+      activeFacultyId = existingFaculty.id;
+    } else if (updatedFacultyName.trim()) {
+      // Create new teacher
+      const newFId = `f-${Date.now().toString().slice(-4)}`;
+      const initials = updatedFacultyName
+        .split(" ")
+        .map((w) => w[0])
+        .join("")
+        .toUpperCase()
+        .slice(0, 3);
+
+      const newFacultyObj: Faculty = {
+        id: newFId,
+        name: updatedFacultyName.trim(),
+        initials: initials || "T",
+        subject: updatedCourseName || "General",
+        preferred_slots: [],
+        unavailable_slots: [],
+        max_daily_sessions: 4,
+        tone: "blue",
+      };
+      setFaculty((prev) => [...prev, newFacultyObj]);
+      activeFacultyId = newFId;
+    }
+
+    // 2. Update Course in course list
+    setCourses((prev) =>
+      prev.map((c) => {
+        if (c.id === session.course_id) {
+          return {
+            ...c,
+            name: updatedCourseName.trim() || c.name,
+            faculty_id: activeFacultyId,
+            group_id: updatedGroupId.trim() || c.group_id,
+          };
+        }
+        return c;
+      }),
+    );
+
+    // 3. Update all scheduled sessions of this course
     const targetRoom = rooms.find((r) => r.id === newRoomId);
     const targetSlot = DEFAULT_SLOTS.find((s) => s.id === newSlotId);
 
-    const updated = result.sessions.map((s) => {
-      if (s.session_id === selectedSession.session_id) {
-        return {
-          ...s,
-          day: newDay,
-          slot_id: newSlotId,
-          slot_label: targetSlot?.label || s.slot_label,
-          room_id: newRoomId,
-          room_name: targetRoom?.name || s.room_name,
-          is_locked: true,
-        };
-      }
-      return s;
+    const updatedSessions = result.sessions.map((s) => {
+      const isThisSession = s.session_id === sessionId;
+      const isThisCourse = s.course_id === session.course_id;
+
+      return {
+        ...s,
+        course_name: isThisCourse ? updatedCourseName.trim() || s.course_name : s.course_name,
+        faculty_id: isThisCourse ? activeFacultyId : s.faculty_id,
+        faculty_name: isThisCourse ? updatedFacultyName.trim() || s.faculty_name : s.faculty_name,
+        group_id: isThisCourse ? updatedGroupId.trim() || s.group_id : s.group_id,
+        day: isThisSession ? newDay : s.day,
+        slot_id: isThisSession ? newSlotId : s.slot_id,
+        slot_label: isThisSession && targetSlot ? targetSlot.label : s.slot_label,
+        room_id: isThisSession ? newRoomId : s.room_id,
+        room_name: isThisSession && targetRoom ? targetRoom.name : s.room_name,
+        is_locked: isThisSession ? true : s.is_locked,
+      };
     });
 
-    setLockedSessions((prev) => ({
-      ...prev,
-      [selectedSession.session_id]: {
-        day: newDay,
-        slot_id: newSlotId,
-        room_id: newRoomId,
-      },
-    }));
+    if (newDay !== session.day || newSlotId !== session.slot_id || newRoomId !== session.room_id) {
+      setLockedSessions((prev) => ({
+        ...prev,
+        [sessionId]: { day: newDay, slot_id: newSlotId, room_id: newRoomId },
+      }));
+    }
 
-    setResult((prev) => ({ ...prev, sessions: updated }));
+    setResult((prev) => ({ ...prev, sessions: updatedSessions }));
     setSessionModalOpen(false);
-    setNotice(`Manually rescheduled ${selectedSession.course_id} to ${newDay} ${targetSlot?.label} in ${targetRoom?.name} (and locked).`);
+    setNotice(`Updated details for subject '${updatedCourseName}' and teacher '${updatedFacultyName}'.`);
   }
 
   // Delete single session from current schedule
@@ -587,10 +674,10 @@ export default function Home() {
           newCourses.push({
             id,
             name,
-            faculty_id: faculty_id || faculty[0].id,
-            group_id: group_id || "CSE-A",
+            faculty_id: faculty_id || faculty[0]?.id || "f1",
+            group_id: group_id || "Class-1",
             room_type: room_type === "lab" ? "lab" : "lecture",
-            capacity: parseInt(capacity) || 60,
+            capacity: parseInt(capacity) || 50,
             weekly_sessions: parseInt(weekly_sessions) || 2,
             duration_slots: parseInt(duration_slots) || 1,
             color: (color as any) || "blue",
@@ -613,10 +700,10 @@ export default function Home() {
 
   const pageTitle = {
     schedule: "Weekly timetable",
-    courses: "Course requirements",
-    faculty: "Faculty availability",
-    rooms: "Rooms & resources",
-    constraints: "Optimisation rules & engine",
+    courses: "Subjects & courses",
+    faculty: "Teachers & faculty",
+    rooms: "Rooms & classrooms",
+    constraints: "Rules & parameters",
   }[view];
 
   return (
@@ -629,7 +716,7 @@ export default function Home() {
           </div>
           <div>
             <div className="brand-name">ChronoSync</div>
-            <div className="brand-subtitle">Academic operations</div>
+            <div className="brand-subtitle">Timetable Platform</div>
           </div>
           <button
             className="sidebar-close"
@@ -640,13 +727,13 @@ export default function Home() {
           </button>
         </div>
 
-        <p className="nav-eyebrow">Workspace</p>
+        <p className="nav-eyebrow">Workspaces</p>
         <nav className="nav-list" aria-label="Primary navigation">
           {[
-            { id: "schedule" as const, label: "Schedule", icon: CalendarDays, count: `${result.sessions.length}` },
-            { id: "courses" as const, label: "Courses", icon: BookOpen, count: `${courses.length}` },
-            { id: "faculty" as const, label: "Faculty", icon: Users, count: `${faculty.length}` },
-            { id: "rooms" as const, label: "Rooms", icon: DoorOpen, count: `${rooms.length}` },
+            { id: "schedule" as const, label: "Timetable View", icon: CalendarDays, count: `${result.sessions.length}` },
+            { id: "courses" as const, label: "Subjects / Courses", icon: BookOpen, count: `${courses.length}` },
+            { id: "faculty" as const, label: "Teachers / Faculty", icon: Users, count: `${faculty.length}` },
+            { id: "rooms" as const, label: "Rooms / Labs", icon: DoorOpen, count: `${rooms.length}` },
             { id: "constraints" as const, label: "Rules & Engine", icon: SlidersHorizontal },
           ].map((item) => {
             const Icon = item.icon;
@@ -669,26 +756,24 @@ export default function Home() {
 
         <div className="sidebar-story">
           <Sparkles size={17} />
-          <strong>Hybrid Solver Active</strong>
+          <strong>Custom Timetables</strong>
           <p>
-            {engine === "browser"
-              ? "Running Genetic Algorithm in TypeScript directly in your browser."
-              : "Connected to Python FastAPI optimizer backend."}
+            Build schedules for schools, colleges, or departments with custom teachers, subjects, and classes.
           </p>
-          <button onClick={() => setView("constraints")}>
-            Tune solver parameters <ArrowUpRight size={14} />
+          <button onClick={() => setWizardModalOpen(true)}>
+            Custom Timetable Wizard <ArrowUpRight size={14} />
           </button>
         </div>
 
         <div className="sidebar-footer">
+          <button onClick={() => setWizardModalOpen(true)}>
+            <Layers size={18} /> New / Switch Template
+          </button>
           <button onClick={() => setSettingsModalOpen(true)}>
             <Settings size={18} /> Settings & Algorithm
           </button>
           <button onClick={handleCheckDiagnostics}>
-            <ShieldCheck size={18} /> Feasibility check
-          </button>
-          <button onClick={handleResetToDefaults}>
-            <RotateCcw size={18} /> Reset to Demo Data
+            <ShieldCheck size={18} /> Check Feasibility
           </button>
           <div className="profile">
             <span>SD</span>
@@ -720,43 +805,101 @@ export default function Home() {
             >
               <Menu size={22} />
             </button>
-            <button className="selector">
-              <Building2 size={17} />
-              <span>Northbridge Institute of Technology</span>
-              <ChevronDown size={15} />
-            </button>
-            <button className="selector term">
-              <CalendarDays size={17} />
-              <span>Odd 2026</span>
-              <ChevronDown size={15} />
-            </button>
+
+            {/* Editable Institution Name */}
+            {isEditingInstName ? (
+              <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                <input
+                  className="form-input"
+                  style={{ height: "36px", minWidth: "260px", fontWeight: 600 }}
+                  value={institutionName}
+                  onChange={(e) => setInstitutionName(e.target.value)}
+                  onBlur={() => setEditingInstName(false)}
+                  onKeyDown={(e) => e.key === "Enter" && setEditingInstName(false)}
+                  autoFocus
+                />
+                <button
+                  className="btn-secondary btn-sm"
+                  onClick={() => setEditingInstName(false)}
+                >
+                  Save
+                </button>
+              </div>
+            ) : (
+              <button
+                className="selector"
+                onClick={() => setEditingInstName(true)}
+                title="Click to rename institution / school"
+              >
+                <Building2 size={17} />
+                <span>{institutionName}</span>
+                <Pencil size={12} style={{ color: "var(--ink-soft)" }} />
+              </button>
+            )}
+
+            {/* Editable Term Name */}
+            {isEditingTermName ? (
+              <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                <input
+                  className="form-input"
+                  style={{ height: "36px", minWidth: "140px", fontWeight: 600 }}
+                  value={termName}
+                  onChange={(e) => setTermName(e.target.value)}
+                  onBlur={() => setEditingTermName(false)}
+                  onKeyDown={(e) => e.key === "Enter" && setEditingTermName(false)}
+                  autoFocus
+                />
+                <button
+                  className="btn-secondary btn-sm"
+                  onClick={() => setEditingTermName(false)}
+                >
+                  Save
+                </button>
+              </div>
+            ) : (
+              <button
+                className="selector term"
+                onClick={() => setEditingTermName(true)}
+                title="Click to rename term or class"
+              >
+                <CalendarDays size={17} />
+                <span>{termName}</span>
+                <Pencil size={12} style={{ color: "var(--ink-soft)" }} />
+              </button>
+            )}
           </div>
 
           <div className="topbar-actions">
-            <span
-              className={`connection ${
-                connection === "live" ? "live" : "demo"
-              }`}
+            {/* Quick Template Switcher / Custom Timetable Button */}
+            <button
+              className="secondary-button"
+              onClick={() => setWizardModalOpen(true)}
+              style={{ fontWeight: 700 }}
             >
+              <Layers size={16} /> New / Templates
+            </button>
+
+            <span className={`connection ${connection === "live" ? "live" : "demo"}`}>
               <span />
-              {connection === "live"
-                ? "FastAPI API Online"
-                : "In-Browser Engine Active"}
+              {connection === "live" ? "FastAPI Online" : "In-Browser Engine"}
             </span>
+
             <button
               className="icon-button"
               onClick={handleCheckDiagnostics}
-              title="Pre-flight feasibility diagnostics"
+              title="Pre-flight feasibility check"
             >
               <ShieldCheck size={19} />
             </button>
+
             <button
               className="icon-button"
               onClick={() => setSettingsModalOpen(true)}
-              title="Solver Settings"
+              title="Algorithm Settings"
             >
               <Settings size={19} />
             </button>
+
             <button className="avatar">SD</button>
           </div>
         </header>
@@ -766,56 +909,63 @@ export default function Home() {
           <div className="page-heading">
             <div>
               <div className="breadcrumb">
-                <LayoutDashboard size={14} /> Academic planning <span>/</span>{" "}
-                {pageTitle}
+                <LayoutDashboard size={14} /> Academic Planning <span>/</span> {pageTitle}
               </div>
               <h1>{pageTitle}</h1>
               <p>
                 {view === "schedule"
-                  ? `${result.sessions.length} sessions scheduled · ${
-                      Object.keys(lockedSessions).length
-                    } locked in place · ${result.metrics.hard_conflicts} clashes`
+                  ? `${result.sessions.length} scheduled periods · ${Object.keys(lockedSessions).length} locked · ${uniqueGroups.length} class sections · ${faculty.length} teachers`
                   : view === "courses"
-                  ? "Define courses, credits, cohorts, and teaching assignments."
+                  ? "Manage subjects, weekly periods, and assign teachers."
                   : view === "faculty"
-                  ? "Manage teaching faculty, weekly hour caps, and preferred times."
+                  ? "Manage teachers, subjects taught, and working hours."
                   : view === "rooms"
-                  ? "Manage lecture halls, laboratory spaces, and capacities."
-                  : "Tune constraint weights, solver engine, and genetic algorithm parameters."}
+                  ? "Manage classrooms, lecture halls, and laboratory rooms."
+                  : "Tune solver engine, constraint weights, and genetic algorithm parameters."}
               </p>
             </div>
 
             <div className="heading-actions">
               {view === "schedule" && (
-                <div style={{ position: "relative" }}>
+                <>
+                  <div style={{ position: "relative" }}>
+                    <button
+                      className="secondary-button"
+                      onClick={() => setExportDropdownOpen(!isExportDropdownOpen)}
+                    >
+                      <Download size={17} /> Export <ChevronDown size={14} />
+                    </button>
+                    {isExportDropdownOpen && (
+                      <div className="dropdown-menu">
+                        <button className="dropdown-item" onClick={handleExportCSV}>
+                          <FileText size={15} /> Export as CSV (Excel)
+                        </button>
+                        <button className="dropdown-item" onClick={handleExportJSON}>
+                          <Download size={15} /> Export as JSON
+                        </button>
+                        <button className="dropdown-item" onClick={handlePrintPDF}>
+                          <Printer size={15} /> Print / Save PDF
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
                   <button
                     className="secondary-button"
-                    onClick={() => setExportDropdownOpen(!isExportDropdownOpen)}
+                    onClick={() => {
+                      setEditingCourse(null);
+                      setCourseModalOpen(true);
+                    }}
+                    title="Add a new subject to schedule"
                   >
-                    <Download size={17} /> Export <ChevronDown size={14} />
+                    <Plus size={16} /> Add Subject
                   </button>
-                  {isExportDropdownOpen && (
-                    <div className="dropdown-menu">
-                      <button className="dropdown-item" onClick={handleExportCSV}>
-                        <FileText size={15} /> Export as CSV (Excel)
-                      </button>
-                      <button className="dropdown-item" onClick={handleExportJSON}>
-                        <Download size={15} /> Export as JSON
-                      </button>
-                      <button className="dropdown-item" onClick={handlePrintPDF}>
-                        <Printer size={15} /> Print / Save PDF
-                      </button>
-                    </div>
-                  )}
-                </div>
+                </>
               )}
 
               {view === "courses" && (
                 <>
-                  <button
-                    className="secondary-button"
-                    onClick={() => setImportModalOpen(true)}
-                  >
+                  <button className="secondary-button" onClick={() => setImportModalOpen(true)}>
                     <FileUp size={16} /> Import CSV
                   </button>
                   <button
@@ -825,7 +975,7 @@ export default function Home() {
                       setCourseModalOpen(true);
                     }}
                   >
-                    <Plus size={16} /> Add course
+                    <Plus size={16} /> Add subject
                   </button>
                 </>
               )}
@@ -838,7 +988,7 @@ export default function Home() {
                     setFacultyModalOpen(true);
                   }}
                 >
-                  <Plus size={16} /> Add faculty
+                  <Plus size={16} /> Add teacher
                 </button>
               )}
 
@@ -850,7 +1000,7 @@ export default function Home() {
                     setRoomModalOpen(true);
                   }}
                 >
-                  <Plus size={16} /> Add room
+                  <Plus size={16} /> Add classroom
                 </button>
               )}
 
@@ -859,11 +1009,7 @@ export default function Home() {
                 onClick={generateTimetable}
                 disabled={isGenerating}
               >
-                {isGenerating ? (
-                  <RefreshCcw className="spin" size={18} />
-                ) : (
-                  <WandSparkles size={18} />
-                )}
+                {isGenerating ? <RefreshCcw className="spin" size={18} /> : <WandSparkles size={18} />}
                 {isGenerating ? "Optimising…" : "Generate timetable"}
               </button>
             </div>
@@ -886,12 +1032,12 @@ export default function Home() {
               <section className="metric-grid" aria-label="Schedule metrics">
                 <Metric
                   icon={<ShieldCheck />}
-                  label="Hard conflicts"
+                  label="Clash status"
                   value={String(result.metrics.hard_conflicts)}
                   detail={
                     result.metrics.hard_conflicts === 0
-                      ? "Feasible schedule"
-                      : "Clashes require review"
+                      ? "Feasible · Zero overlaps"
+                      : "Clashes require attention"
                   }
                   tone={result.metrics.hard_conflicts === 0 ? "blue" : "amber"}
                 />
@@ -899,14 +1045,14 @@ export default function Home() {
                   icon={<Target />}
                   label="Preference fit"
                   value={`${Math.round(result.metrics.preference_fit)}%`}
-                  detail="Faculty preferred hours matched"
+                  detail="Teacher preferred slots honoured"
                   tone="amber"
                 />
                 <Metric
                   icon={<Building2 />}
                   label="Room utilisation"
                   value={`${Math.round(result.metrics.room_utilisation)}%`}
-                  detail="Across active halls & labs"
+                  detail="Across active classrooms"
                   tone="sage"
                 />
                 <Metric
@@ -925,7 +1071,7 @@ export default function Home() {
                   <input
                     value={query}
                     onChange={(e) => setQuery(e.target.value)}
-                    placeholder="Search course, faculty, or room…"
+                    placeholder="Search subject, teacher, classroom, or class…"
                   />
                   {query && (
                     <button
@@ -940,37 +1086,31 @@ export default function Home() {
                 {/* Perspective selector tabs */}
                 <div className="view-mode-tabs">
                   <button
-                    className={`view-mode-tab ${
-                      filterMode === "group" ? "active" : ""
-                    }`}
+                    className={`view-mode-tab ${filterMode === "group" ? "active" : ""}`}
                     onClick={() => {
                       setFilterMode("group");
                       setFilterValue("All");
                     }}
                   >
-                    Section View
+                    Class / Section
                   </button>
                   <button
-                    className={`view-mode-tab ${
-                      filterMode === "faculty" ? "active" : ""
-                    }`}
+                    className={`view-mode-tab ${filterMode === "faculty" ? "active" : ""}`}
                     onClick={() => {
                       setFilterMode("faculty");
                       setFilterValue("All");
                     }}
                   >
-                    Faculty View
+                    Teacher View
                   </button>
                   <button
-                    className={`view-mode-tab ${
-                      filterMode === "room" ? "active" : ""
-                    }`}
+                    className={`view-mode-tab ${filterMode === "room" ? "active" : ""}`}
                     onClick={() => {
                       setFilterMode("room");
                       setFilterValue("All");
                     }}
                   >
-                    Room View
+                    Classroom View
                   </button>
                 </div>
 
@@ -978,9 +1118,9 @@ export default function Home() {
                 <label className="field-select">
                   <span>
                     {filterMode === "group"
-                      ? "Group"
+                      ? "Class"
                       : filterMode === "faculty"
-                      ? "Instructor"
+                      ? "Teacher"
                       : "Room"}
                     :
                   </span>
@@ -989,7 +1129,7 @@ export default function Home() {
                     onChange={(e) => setFilterValue(e.target.value)}
                   >
                     <option value="All">
-                      All {filterMode === "group" ? "Sections" : filterMode === "faculty" ? "Faculty" : "Rooms"}
+                      All {filterMode === "group" ? "Classes" : filterMode === "faculty" ? "Teachers" : "Rooms"}
                     </option>
                     {filterMode === "group" &&
                       uniqueGroups.map((g) => (
@@ -1006,7 +1146,7 @@ export default function Home() {
                     {filterMode === "room" &&
                       rooms.map((r) => (
                         <option key={r.id} value={r.id}>
-                          {r.name} ({r.room_type})
+                          {r.name}
                         </option>
                       ))}
                   </select>
@@ -1014,20 +1154,23 @@ export default function Home() {
 
                 <button
                   className="filter-button"
-                  onClick={handleCheckDiagnostics}
-                  title="Run instant feasibility diagnostics"
+                  onClick={() => {
+                    setEditingCourse(null);
+                    setCourseModalOpen(true);
+                  }}
+                  title="Add new subject"
                 >
-                  <ShieldCheck size={16} /> Check Feasibility
+                  <Plus size={15} /> Add Subject
                 </button>
 
                 <div className="toolbar-status">
                   {result.metrics.hard_conflicts === 0 ? (
                     <>
-                      <CheckCircle2 size={16} /> All hard constraints satisfied
+                      <CheckCircle2 size={16} /> Clash-free schedule
                     </>
                   ) : (
                     <span style={{ color: "#d9534f" }}>
-                      <AlertTriangle size={16} /> {result.metrics.hard_conflicts} conflict(s)
+                      <AlertTriangle size={16} /> {result.metrics.hard_conflicts} clash(es)
                     </span>
                   )}
                 </div>
@@ -1040,13 +1183,11 @@ export default function Home() {
                     <div className="timetable-grid">
                       <div className="grid-head time-head">Time</div>
                       {DEFAULT_DAYS.map((day) => {
-                        const daySessions = filteredSessions.filter(
-                          (item) => item.day === day,
-                        );
+                        const daySessions = filteredSessions.filter((item) => item.day === day);
                         return (
                           <div key={day} className="grid-head">
                             {day}
-                            <small>{daySessions.length} sessions</small>
+                            <small>{daySessions.length} periods</small>
                           </div>
                         );
                       })}
@@ -1058,14 +1199,10 @@ export default function Home() {
                         </div>,
                         ...DEFAULT_DAYS.map((day) => {
                           const items = filteredSessions.filter(
-                            (item) =>
-                              item.day === day && item.slot_id === slot.id,
+                            (item) => item.day === day && item.slot_id === slot.id,
                           );
                           return (
-                            <div
-                              key={`${day}-${slot.id}`}
-                              className="schedule-cell"
-                            >
+                            <div key={`${day}-${slot.id}`} className="schedule-cell">
                               {items.map((item) => (
                                 <SessionCard
                                   key={item.session_id}
@@ -1085,37 +1222,49 @@ export default function Home() {
 
                   <div className="legend">
                     <span>
-                      <i className="blue" /> Core CS
+                      <i className="blue" /> Core Subject
                     </span>
                     <span>
-                      <i className="amber" /> Foundations
+                      <i className="amber" /> Theory
                     </span>
                     <span>
-                      <i className="sage" /> Laboratory
+                      <i className="sage" /> Practical / Lab
                     </span>
                     <span>
-                      <i className="violet" /> Humanities
+                      <i className="violet" /> Language / Elective
                     </span>
                     <span className="legend-note">
-                      <LockKeyhole size={14} /> Click any session to inspect,
-                      lock, or reschedule
+                      <LockKeyhole size={14} /> Click any class to edit subject, teacher, section or lock in place
                     </span>
                   </div>
                 </section>
 
-                {/* INSIGHT PANEL */}
+                {/* INSIGHT PANEL (TEACHERS & QUICK EDIT) */}
                 <aside className="insight-panel">
                   <div className="panel-heading">
                     <div>
                       <span className="eyebrow">Assigned Workload</span>
-                      <h2>Faculty Load</h2>
+                      <h2>Teachers & Faculty</h2>
                     </div>
                     <button
-                      onClick={() => setView("faculty")}
-                      aria-label="Manage faculty"
-                      title="Manage faculty"
+                      onClick={() => {
+                        setEditingFaculty(null);
+                        setFacultyModalOpen(true);
+                      }}
+                      title="Add new teacher"
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "4px",
+                        fontSize: "11px",
+                        color: "var(--cobalt)",
+                        fontWeight: 700,
+                        border: 0,
+                        background: "transparent",
+                        cursor: "pointer",
+                      }}
                     >
-                      <SlidersHorizontal size={17} />
+                      <Plus size={14} /> Add
                     </button>
                   </div>
 
@@ -1126,37 +1275,50 @@ export default function Home() {
                       const percent = Math.min(100, Math.round((currentHours / maxHours) * 100));
 
                       return (
-                        <article
-                          className="faculty-card"
-                          key={f.id}
-                          style={{ cursor: "pointer" }}
-                          onClick={() => {
-                            setFilterMode("faculty");
-                            setFilterValue(f.id);
-                          }}
-                        >
-                          <div className={`faculty-avatar ${f.tone}`}>
+                        <article className="faculty-card" key={f.id}>
+                          <div
+                            className={`faculty-avatar ${f.tone}`}
+                            onClick={() => {
+                              setFilterMode("faculty");
+                              setFilterValue(f.id);
+                            }}
+                            style={{ cursor: "pointer" }}
+                            title="Filter timetable by this teacher"
+                          >
                             {f.initials}
                           </div>
                           <div className="faculty-copy">
-                            <div>
-                              <strong>{f.name}</strong>
-                              <small>{f.subject}</small>
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                              <div>
+                                <strong>{f.name}</strong>
+                                <small>{f.subject}</small>
+                              </div>
+                              <button
+                                className="action-btn"
+                                style={{ width: "22px", height: "22px" }}
+                                onClick={() => {
+                                  setEditingFaculty(f);
+                                  setFacultyModalOpen(true);
+                                }}
+                                title="Edit teacher name or subjects"
+                              >
+                                <Pencil size={11} />
+                              </button>
                             </div>
+
                             <p>
                               <Clock3 size={13} />
                               {f.preferred_slots.length > 0
                                 ? f.preferred_slots.join(", ")
-                                : "No preference"}
+                                : "Any slot"}
                             </p>
+
                             <div className="load-line">
-                              <span>Workload</span>
+                              <span>Load</span>
                               <div>
                                 <i style={{ width: `${percent}%` }} />
                               </div>
-                              <b>
-                                {currentHours}/{maxHours}h
-                              </b>
+                              <b>{currentHours}/{maxHours}h</b>
                             </div>
                           </div>
                         </article>
@@ -1164,11 +1326,8 @@ export default function Home() {
                     })}
                   </div>
 
-                  <button
-                    className="text-button"
-                    onClick={() => setView("faculty")}
-                  >
-                    Manage all faculty & availability <ArrowUpRight size={15} />
+                  <button className="text-button" onClick={() => setView("faculty")}>
+                    Manage all teachers <ArrowUpRight size={15} />
                   </button>
 
                   <div className="algorithm-note">
@@ -1176,19 +1335,17 @@ export default function Home() {
                       <Sparkles size={18} />
                     </div>
                     <div>
-                      <strong>Convergence Fitness</strong>
+                      <strong>Genetic Algorithm Progress</strong>
                       <p>
-                        Elite score:{" "}
-                        {result.run.convergence[result.run.convergence.length - 1] || 0.94}
+                        Current fitness: {result.run.convergence[result.run.convergence.length - 1] || 0.94}
                       </p>
-                      {/* Mini visual convergence track */}
                       <div className="convergence-mini-chart">
                         {result.run.convergence.slice(-15).map((fit, idx) => (
                           <div
                             key={idx}
                             className="convergence-bar"
                             style={{ height: `${Math.round(fit * 100)}%` }}
-                            title={`Gen ${idx + 1}: ${fit}`}
+                            title={`Generation ${idx + 1}: ${fit}`}
                           />
                         ))}
                       </div>
@@ -1213,9 +1370,9 @@ export default function Home() {
                 setCourseModalOpen(true);
               }}
               onDelete={(id) => {
-                if (confirm(`Delete course ${id}?`)) {
+                if (confirm(`Delete subject ${id}?`)) {
                   setCourses(courses.filter((c) => c.id !== id));
-                  setNotice(`Course ${id} deleted.`);
+                  setNotice(`Subject ${id} deleted.`);
                 }
               }}
               onImport={() => setImportModalOpen(true)}
@@ -1236,9 +1393,9 @@ export default function Home() {
                 setFacultyModalOpen(true);
               }}
               onDelete={(id) => {
-                if (confirm(`Remove faculty member ${id}?`)) {
+                if (confirm(`Remove teacher ${id}?`)) {
                   setFaculty(faculty.filter((f) => f.id !== id));
-                  setNotice(`Faculty ${id} removed.`);
+                  setNotice(`Teacher ${id} removed.`);
                 }
               }}
             />
@@ -1258,7 +1415,7 @@ export default function Home() {
                 setRoomModalOpen(true);
               }}
               onDelete={(id) => {
-                if (confirm(`Delete room ${id}?`)) {
+                if (confirm(`Delete classroom ${id}?`)) {
                   setRooms(rooms.filter((r) => r.id !== id));
                   setNotice(`Room ${id} deleted.`);
                 }
@@ -1288,9 +1445,7 @@ export default function Home() {
           <div className="run-top">
             <div>
               <span className="live-dot" />
-              {engine === "browser"
-                ? "Browser Genetic Algorithm"
-                : "FastAPI Hybrid Solver"}
+              {engine === "browser" ? "Browser Genetic Algorithm" : "FastAPI Hybrid Solver"}
             </div>
             <strong>{progress}%</strong>
           </div>
@@ -1301,25 +1456,13 @@ export default function Home() {
             <span className={progress >= 18 ? "done" : "active"}>
               <Check size={13} /> Validate
             </span>
-            <span
-              className={
-                progress >= 45 ? "done" : progress >= 18 ? "active" : ""
-              }
-            >
+            <span className={progress >= 45 ? "done" : progress >= 18 ? "active" : ""}>
               <Check size={13} /> Seed
             </span>
-            <span
-              className={
-                progress >= 78 ? "done" : progress >= 45 ? "active" : ""
-              }
-            >
+            <span className={progress >= 78 ? "done" : progress >= 45 ? "active" : ""}>
               <Check size={13} /> Evolve (GA)
             </span>
-            <span
-              className={
-                progress >= 96 ? "done" : progress >= 78 ? "active" : ""
-              }
-            >
+            <span className={progress >= 96 ? "done" : progress >= 78 ? "active" : ""}>
               <Check size={13} /> Tabu Refine
             </span>
           </div>
@@ -1331,14 +1474,15 @@ export default function Home() {
         <CourseModal
           course={editingCourse}
           facultyList={faculty}
+          uniqueGroups={uniqueGroups}
           onClose={() => setCourseModalOpen(false)}
           onSave={(savedCourse) => {
             if (editingCourse) {
               setCourses(courses.map((c) => (c.id === editingCourse.id ? savedCourse : c)));
-              setNotice(`Updated course ${savedCourse.id}`);
+              setNotice(`Updated subject ${savedCourse.name}`);
             } else {
               setCourses([...courses, savedCourse]);
-              setNotice(`Added new course ${savedCourse.id}`);
+              setNotice(`Added new subject ${savedCourse.name}`);
             }
             setCourseModalOpen(false);
           }}
@@ -1354,10 +1498,10 @@ export default function Home() {
           onSave={(savedFaculty) => {
             if (editingFaculty) {
               setFaculty(faculty.map((f) => (f.id === editingFaculty.id ? savedFaculty : f)));
-              setNotice(`Updated faculty ${savedFaculty.name}`);
+              setNotice(`Updated teacher ${savedFaculty.name}`);
             } else {
               setFaculty([...faculty, savedFaculty]);
-              setNotice(`Added new faculty ${savedFaculty.name}`);
+              setNotice(`Added new teacher ${savedFaculty.name}`);
             }
             setFacultyModalOpen(false);
           }}
@@ -1372,17 +1516,17 @@ export default function Home() {
           onSave={(savedRoom) => {
             if (editingRoom) {
               setRooms(rooms.map((r) => (r.id === editingRoom.id ? savedRoom : r)));
-              setNotice(`Updated room ${savedRoom.name}`);
+              setNotice(`Updated classroom ${savedRoom.name}`);
             } else {
               setRooms([...rooms, savedRoom]);
-              setNotice(`Added new room ${savedRoom.name}`);
+              setNotice(`Added new classroom ${savedRoom.name}`);
             }
             setRoomModalOpen(false);
           }}
         />
       )}
 
-      {/* MODAL: SESSION INSPECTOR & RESCHEDULER */}
+      {/* MODAL: SESSION INSPECTOR & IN-PLACE CUSTOMIZER */}
       {isSessionModalOpen && selectedSession && (
         <SessionDetailModal
           session={selectedSession}
@@ -1393,8 +1537,41 @@ export default function Home() {
           facultyList={faculty}
           onClose={() => setSessionModalOpen(false)}
           onToggleLock={() => handleToggleLockSession(selectedSession)}
-          onReschedule={handleManualReschedule}
+          onSaveDetails={handleUpdateSessionDetails}
           onDelete={() => handleDeleteSession(selectedSession.session_id)}
+        />
+      )}
+
+      {/* MODAL: CUSTOM TIMETABLE & TEMPLATE WIZARD */}
+      {isWizardModalOpen && (
+        <TimetableWizardModal
+          currentInstName={institutionName}
+          currentTermName={termName}
+          onClose={() => setWizardModalOpen(false)}
+          onApplyTemplate={handleApplyTemplate}
+          onCreateCustom={(customData) => {
+            setInstitutionName(customData.institution);
+            setTermName(customData.term);
+            setCourses(customData.courses);
+            setFaculty(customData.faculty);
+            setRooms(customData.rooms);
+            setLockedSessions({});
+
+            const scheduler = new ClientScheduler(
+              customData.institution,
+              customData.term,
+              DEFAULT_DAYS,
+              DEFAULT_SLOTS,
+              customData.rooms,
+              customData.faculty,
+              customData.courses,
+              constraints,
+              config,
+            );
+            setResult(scheduler.run());
+            setWizardModalOpen(false);
+            setNotice(`Created custom timetable '${customData.institution}' with ${customData.courses.length} subjects!`);
+          }}
         />
       )}
 
@@ -1432,7 +1609,10 @@ export default function Home() {
           setEngine={setEngine}
           connection={connection}
           onClose={() => setSettingsModalOpen(false)}
-          onResetDefaults={handleResetToDefaults}
+          onResetDefaults={() => {
+            handleApplyTemplate(PRESET_TEMPLATES[0]);
+            setSettingsModalOpen(false);
+          }}
         />
       )}
     </main>
@@ -1476,7 +1656,11 @@ function SessionCard({
   onClick: () => void;
 }) {
   return (
-    <article className={`session-card ${session.color}`} onClick={onClick}>
+    <article
+      className={`session-card ${session.color}`}
+      onClick={onClick}
+      title="Click to edit subject, teacher, class or lock slot"
+    >
       <div className="session-title">
         <strong>{session.course_id}</strong>
         <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
@@ -1531,7 +1715,7 @@ function CourseView({
         <div className="search-field">
           <Search size={17} />
           <input
-            placeholder="Search courses by code, name, section, faculty…"
+            placeholder="Search subjects by code, name, class, teacher…"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
           />
@@ -1540,16 +1724,16 @@ function CourseView({
           <FileUp size={16} /> Import CSV
         </button>
         <button className="primary-button" onClick={onAdd}>
-          <Plus size={16} /> Add course
+          <Plus size={16} /> Add subject
         </button>
       </div>
 
       <div className="data-table">
         <div className="table-row table-header">
-          <span>Course Code & Name</span>
-          <span>Section</span>
-          <span>Requirement</span>
-          <span>Assigned Faculty</span>
+          <span>Subject Code & Title</span>
+          <span>Class / Section</span>
+          <span>Weekly Periods</span>
+          <span>Assigned Teacher</span>
           <span>Type & Actions</span>
         </div>
 
@@ -1562,25 +1746,25 @@ function CourseView({
             <span>{course.group_id}</span>
             <span>
               {course.weekly_sessions} session{course.weekly_sessions > 1 ? "s" : ""} ×{" "}
-              {course.duration_slots}h ({course.capacity} seats)
+              {course.duration_slots}h ({course.capacity} students)
             </span>
             <span>{facultyMap.get(course.faculty_id) || course.faculty_id}</span>
             <span style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
               <i className={`tag ${course.room_type === "lab" ? "sage" : "blue"}`}>
-                {course.room_type === "lab" ? "Lab" : "Lecture"}
+                {course.room_type === "lab" ? "Lab / Practical" : "Theory Class"}
               </i>
               <div className="row-actions">
                 <button
                   className="action-btn"
                   onClick={() => onEdit(course)}
-                  title="Edit course"
+                  title="Edit subject"
                 >
                   <Pencil size={13} />
                 </button>
                 <button
                   className="action-btn delete"
                   onClick={() => onDelete(course.id)}
-                  title="Delete course"
+                  title="Delete subject"
                 >
                   <Trash2 size={13} />
                 </button>
@@ -1610,7 +1794,7 @@ function FacultyView({
     <div>
       <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: "16px" }}>
         <button className="primary-button" onClick={onAdd}>
-          <Plus size={16} /> Add faculty member
+          <Plus size={16} /> Add teacher / faculty
         </button>
       </div>
 
@@ -1629,13 +1813,13 @@ function FacultyView({
                   <p>{f.subject}</p>
                 </div>
                 <div className="row-actions" style={{ marginLeft: "auto" }}>
-                  <button className="action-btn" onClick={() => onEdit(f)} title="Edit faculty">
+                  <button className="action-btn" onClick={() => onEdit(f)} title="Edit teacher">
                     <Pencil size={13} />
                   </button>
                   <button
                     className="action-btn delete"
                     onClick={() => onDelete(f.id)}
-                    title="Delete faculty"
+                    title="Delete teacher"
                   >
                     <Trash2 size={13} />
                   </button>
@@ -1687,7 +1871,7 @@ function RoomView({
     <div>
       <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: "16px" }}>
         <button className="primary-button" onClick={onAdd}>
-          <Plus size={16} /> Add room
+          <Plus size={16} /> Add classroom / lab
         </button>
       </div>
 
@@ -1726,7 +1910,7 @@ function RoomView({
                   <b>{room.capacity}</b> seats
                 </span>
                 <span>
-                  <b>{room.room_type === "lab" ? "Laboratory" : "Lecture Hall"}</b>
+                  <b>{room.room_type === "lab" ? "Laboratory" : "Classroom"}</b>
                 </span>
               </div>
 
@@ -1932,20 +2116,22 @@ function ConstraintView({
 function CourseModal({
   course,
   facultyList,
+  uniqueGroups,
   onClose,
   onSave,
 }: {
   course: Course | null;
   facultyList: Faculty[];
+  uniqueGroups: string[];
   onClose: () => void;
   onSave: (c: Course) => void;
 }) {
   const [code, setCode] = useState(course?.id || "");
   const [name, setName] = useState(course?.name || "");
   const [facultyId, setFacultyId] = useState(course?.faculty_id || facultyList[0]?.id || "");
-  const [groupId, setGroupId] = useState(course?.group_id || "CSE-A");
+  const [groupId, setGroupId] = useState(course?.group_id || uniqueGroups[0] || "Class 10-A");
   const [roomType, setRoomType] = useState<"lecture" | "lab">(course?.room_type || "lecture");
-  const [capacity, setCapacity] = useState(course?.capacity || 60);
+  const [capacity, setCapacity] = useState(course?.capacity || 45);
   const [weeklySessions, setWeeklySessions] = useState(course?.weekly_sessions || 3);
   const [durationSlots, setDurationSlots] = useState(course?.duration_slots || 1);
   const [color, setColor] = useState<Course["color"]>(course?.color || "blue");
@@ -1953,16 +2139,16 @@ function CourseModal({
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!code.trim() || !name.trim()) {
-      alert("Please enter course code and title.");
+      alert("Please enter subject code and title.");
       return;
     }
     onSave({
       id: code.trim().toUpperCase(),
       name: name.trim(),
       faculty_id: facultyId,
-      group_id: groupId.trim().toUpperCase(),
+      group_id: groupId.trim(),
       room_type: roomType,
-      capacity: Number(capacity) || 60,
+      capacity: Number(capacity) || 45,
       weekly_sessions: Number(weeklySessions) || 1,
       duration_slots: Number(durationSlots) || 1,
       color,
@@ -1973,7 +2159,7 @@ function CourseModal({
     <div className="modal-backdrop">
       <div className="modal-box">
         <div className="modal-header">
-          <h3>{course ? "Edit Course" : "Add New Course"}</h3>
+          <h3>{course ? "Edit Subject" : "Add New Subject"}</h3>
           <button className="modal-close" onClick={onClose}>
             <X size={20} />
           </button>
@@ -1982,40 +2168,40 @@ function CourseModal({
           <div className="modal-body">
             <div className="form-row">
               <div className="form-group">
-                <label className="form-label">Course Code</label>
+                <label className="form-label">Subject Code</label>
                 <input
                   className="form-input"
                   value={code}
                   onChange={(e) => setCode(e.target.value)}
-                  placeholder="e.g. CS201"
+                  placeholder="e.g. MATH-101 or ENG"
                   required
                 />
               </div>
               <div className="form-group">
-                <label className="form-label">Student Group</label>
+                <label className="form-label">Class / Section</label>
                 <input
                   className="form-input"
                   value={groupId}
                   onChange={(e) => setGroupId(e.target.value)}
-                  placeholder="e.g. CSE-A"
+                  placeholder="e.g. Class 10-A, CSE-1, Batch B"
                   required
                 />
               </div>
             </div>
 
             <div className="form-group">
-              <label className="form-label">Course Title</label>
+              <label className="form-label">Subject / Course Name</label>
               <input
                 className="form-input"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="e.g. Data Structures & Algorithms"
+                placeholder="e.g. Mathematics, Physics, Microeconomics"
                 required
               />
             </div>
 
             <div className="form-group">
-              <label className="form-label">Assigned Faculty Member</label>
+              <label className="form-label">Assigned Teacher / Faculty</label>
               <select
                 className="form-select"
                 value={facultyId}
@@ -2037,13 +2223,13 @@ function CourseModal({
                   value={roomType}
                   onChange={(e) => setRoomType(e.target.value as any)}
                 >
-                  <option value="lecture">Lecture Hall</option>
-                  <option value="lab">Laboratory</option>
+                  <option value="lecture">Classroom</option>
+                  <option value="lab">Laboratory / Practical</option>
                 </select>
               </div>
 
               <div className="form-group">
-                <label className="form-label">Weekly Sessions</label>
+                <label className="form-label">Periods / Week</label>
                 <input
                   type="number"
                   min="1"
@@ -2055,21 +2241,21 @@ function CourseModal({
               </div>
 
               <div className="form-group">
-                <label className="form-label">Duration (Slots)</label>
+                <label className="form-label">Duration</label>
                 <select
                   className="form-select"
                   value={durationSlots}
                   onChange={(e) => setDurationSlots(parseInt(e.target.value))}
                 >
-                  <option value="1">1 hour</option>
-                  <option value="2">2 hours (Lab)</option>
-                  <option value="3">3 hours</option>
+                  <option value="1">1 period (1h)</option>
+                  <option value="2">2 periods (2h Lab)</option>
+                  <option value="3">3 periods (3h)</option>
                 </select>
               </div>
             </div>
 
             <div className="form-group">
-              <label className="form-label">Cohort Capacity</label>
+              <label className="form-label">Student Capacity</label>
               <input
                 type="number"
                 min="10"
@@ -2081,7 +2267,7 @@ function CourseModal({
             </div>
 
             <div className="form-group">
-              <label className="form-label">Color Label</label>
+              <label className="form-label">Card Color</label>
               <div className="color-picker">
                 {(["blue", "amber", "sage", "violet", "sand", "rose"] as const).map((col) => (
                   <div
@@ -2099,7 +2285,7 @@ function CourseModal({
               Cancel
             </button>
             <button type="submit" className="primary-button">
-              {course ? "Save changes" : "Add course"}
+              {course ? "Save changes" : "Add subject"}
             </button>
           </div>
         </form>
@@ -2122,7 +2308,7 @@ function FacultyModal({
   const [name, setName] = useState(facultyMember?.name || "");
   const [initials, setInitials] = useState(facultyMember?.initials || "");
   const [subject, setSubject] = useState(facultyMember?.subject || "");
-  const [maxDaily, setMaxDaily] = useState(facultyMember?.max_daily_sessions || 3);
+  const [maxDaily, setMaxDaily] = useState(facultyMember?.max_daily_sessions || 4);
   const [preferredSlots, setPreferredSlots] = useState<string[]>(facultyMember?.preferred_slots || []);
   const [tone, setTone] = useState<Faculty["tone"]>(facultyMember?.tone || "blue");
 
@@ -2142,10 +2328,10 @@ function FacultyModal({
       id: facultyMember?.id || `f-${Date.now().toString().slice(-4)}`,
       name: name.trim(),
       initials: initials.trim() || name.slice(0, 2).toUpperCase(),
-      subject: subject.trim() || "Computer Science",
+      subject: subject.trim() || "General",
       preferred_slots: preferredSlots,
       unavailable_slots: facultyMember?.unavailable_slots || [],
-      max_daily_sessions: Number(maxDaily) || 3,
+      max_daily_sessions: Number(maxDaily) || 4,
       tone,
     });
   }
@@ -2154,7 +2340,7 @@ function FacultyModal({
     <div className="modal-backdrop">
       <div className="modal-box">
         <div className="modal-header">
-          <h3>{facultyMember ? "Edit Faculty Profile" : "Add Faculty Member"}</h3>
+          <h3>{facultyMember ? "Edit Teacher Profile" : "Add Teacher / Faculty"}</h3>
           <button className="modal-close" onClick={onClose}>
             <X size={20} />
           </button>
@@ -2164,7 +2350,7 @@ function FacultyModal({
           <div className="modal-body">
             <div className="form-row">
               <div className="form-group">
-                <label className="form-label">Full Name</label>
+                <label className="form-label">Teacher's Full Name</label>
                 <input
                   className="form-input"
                   value={name}
@@ -2175,7 +2361,7 @@ function FacultyModal({
                       setInitials(parts.map((p) => p[0]).join("").toUpperCase().slice(0, 3));
                     }
                   }}
-                  placeholder="e.g. Dr. Jane Smith"
+                  placeholder="e.g. Mr. John Doe or Dr. Sarah Connor"
                   required
                 />
               </div>
@@ -2186,7 +2372,7 @@ function FacultyModal({
                   className="form-input"
                   value={initials}
                   onChange={(e) => setInitials(e.target.value.toUpperCase())}
-                  placeholder="e.g. JS"
+                  placeholder="e.g. JD"
                   maxLength={4}
                   required
                 />
@@ -2195,18 +2381,18 @@ function FacultyModal({
 
             <div className="form-row">
               <div className="form-group">
-                <label className="form-label">Department / Specialization</label>
+                <label className="form-label">Subject / Department</label>
                 <input
                   className="form-input"
                   value={subject}
                   onChange={(e) => setSubject(e.target.value)}
-                  placeholder="e.g. Machine Learning"
+                  placeholder="e.g. Mathematics, Physics, English"
                   required
                 />
               </div>
 
               <div className="form-group">
-                <label className="form-label">Max Sessions / Day</label>
+                <label className="form-label">Max Classes / Day</label>
                 <input
                   type="number"
                   min="1"
@@ -2219,7 +2405,7 @@ function FacultyModal({
             </div>
 
             <div className="form-group">
-              <label className="form-label">Preferred Time Slots (Click to toggle)</label>
+              <label className="form-label">Preferred Teaching Slots (Click to toggle)</label>
               <div className="slot-pills">
                 {slots.map((s) => (
                   <button
@@ -2253,7 +2439,7 @@ function FacultyModal({
               Cancel
             </button>
             <button type="submit" className="primary-button">
-              {facultyMember ? "Save changes" : "Add faculty"}
+              {facultyMember ? "Save changes" : "Add teacher"}
             </button>
           </div>
         </form>
@@ -2272,8 +2458,8 @@ function RoomModal({
   onSave: (r: Room) => void;
 }) {
   const [name, setName] = useState(room?.name || "");
-  const [building, setBuilding] = useState(room?.building || "Computing Block");
-  const [capacity, setCapacity] = useState(room?.capacity || 60);
+  const [building, setBuilding] = useState(room?.building || "Main Wing");
+  const [capacity, setCapacity] = useState(room?.capacity || 50);
   const [roomType, setRoomType] = useState<"lecture" | "lab">(room?.room_type || "lecture");
 
   function handleSubmit(e: React.FormEvent) {
@@ -2293,7 +2479,7 @@ function RoomModal({
     <div className="modal-backdrop">
       <div className="modal-box">
         <div className="modal-header">
-          <h3>{room ? "Edit Room" : "Add New Room"}</h3>
+          <h3>{room ? "Edit Classroom" : "Add New Classroom"}</h3>
           <button className="modal-close" onClick={onClose}>
             <X size={20} />
           </button>
@@ -2308,18 +2494,18 @@ function RoomModal({
                   className="form-input"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  placeholder="e.g. C-205"
+                  placeholder="e.g. Room 101, Science Lab 2"
                   required
                 />
               </div>
 
               <div className="form-group">
-                <label className="form-label">Building / Wing</label>
+                <label className="form-label">Building / Block</label>
                 <input
                   className="form-input"
                   value={building}
                   onChange={(e) => setBuilding(e.target.value)}
-                  placeholder="e.g. Science Block"
+                  placeholder="e.g. Academic Block, Science Wing"
                   required
                 />
               </div>
@@ -2327,7 +2513,7 @@ function RoomModal({
 
             <div className="form-row">
               <div className="form-group">
-                <label className="form-label">Seating Capacity</label>
+                <label className="form-label">Student Capacity</label>
                 <input
                   type="number"
                   min="10"
@@ -2339,14 +2525,14 @@ function RoomModal({
               </div>
 
               <div className="form-group">
-                <label className="form-label">Room Type</label>
+                <label className="form-label">Classroom Type</label>
                 <select
                   className="form-select"
                   value={roomType}
                   onChange={(e) => setRoomType(e.target.value as any)}
                 >
-                  <option value="lecture">Lecture Hall</option>
-                  <option value="lab">Computer Laboratory</option>
+                  <option value="lecture">Standard Classroom / Lecture Hall</option>
+                  <option value="lab">Computer / Science Laboratory</option>
                 </select>
               </div>
             </div>
@@ -2357,7 +2543,7 @@ function RoomModal({
               Cancel
             </button>
             <button type="submit" className="primary-button">
-              {room ? "Save changes" : "Add room"}
+              {room ? "Save changes" : "Add classroom"}
             </button>
           </div>
         </form>
@@ -2366,6 +2552,7 @@ function RoomModal({
   );
 }
 
+// IN-PLACE SESSION MODAL: Allows editing subject name, teacher name, class, or moving session!
 function SessionDetailModal({
   session,
   allSessions,
@@ -2375,7 +2562,7 @@ function SessionDetailModal({
   facultyList,
   onClose,
   onToggleLock,
-  onReschedule,
+  onSaveDetails,
   onDelete,
 }: {
   session: ScheduledSession;
@@ -2386,9 +2573,21 @@ function SessionDetailModal({
   facultyList: Faculty[];
   onClose: () => void;
   onToggleLock: () => void;
-  onReschedule: (newDay: string, newSlotId: string, newRoomId: string) => void;
+  onSaveDetails: (
+    sessionId: string,
+    updatedCourseName: string,
+    updatedFacultyName: string,
+    updatedGroupId: string,
+    newDay: string,
+    newSlotId: string,
+    newRoomId: string,
+  ) => void;
   onDelete: () => void;
 }) {
+  const [courseName, setCourseName] = useState(session.course_name);
+  const [teacherName, setTeacherName] = useState(session.faculty_name);
+  const [groupId, setGroupId] = useState(session.group_id);
+
   const [newDay, setNewDay] = useState(session.day);
   const [newSlotId, setNewSlotId] = useState(session.slot_id);
   const [newRoomId, setNewRoomId] = useState(session.room_id);
@@ -2412,24 +2611,37 @@ function SessionDetailModal({
     if (collisions.length > 0) {
       const c = collisions[0];
       if (c.room_id === newRoomId) {
-        return `Clash! Room ${c.room_name} is already booked by ${c.course_id} at this time.`;
+        return `Clash! Room ${c.room_name} is already booked by ${c.course_name} at this time.`;
       }
       if (c.faculty_id === session.faculty_id) {
-        return `Clash! Instructor ${c.faculty_name} is already teaching ${c.course_id} at this time.`;
+        return `Clash! Teacher ${c.faculty_name} is already teaching ${c.course_name} at this time.`;
       }
       if (c.group_id === session.group_id) {
-        return `Clash! Section ${c.group_id} has another class (${c.course_id}) at this time.`;
+        return `Clash! Section ${c.group_id} has another class (${c.course_name}) at this time.`;
       }
     }
     return null;
   }, [session, allSessions, newDay, newSlotId, newRoomId]);
 
+  function handleSave(e: React.FormEvent) {
+    e.preventDefault();
+    onSaveDetails(
+      session.session_id,
+      courseName,
+      teacherName,
+      groupId,
+      newDay,
+      newSlotId,
+      newRoomId,
+    );
+  }
+
   return (
     <div className="modal-backdrop">
-      <div className="modal-box">
+      <div className="modal-box large">
         <div className="modal-header">
           <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-            <h3>{session.course_id}: {session.course_name}</h3>
+            <h3>Edit Period: {session.course_id}</h3>
             {session.is_locked && (
               <span className="locked-indicator">
                 <Lock size={11} /> Locked
@@ -2441,136 +2653,517 @@ function SessionDetailModal({
           </button>
         </div>
 
-        <div className="modal-body">
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", background: "#f8f6f0", padding: "12px", borderRadius: "10px" }}>
-            <div>
-              <span className="form-label">Instructor</span>
-              <div style={{ fontWeight: 600, fontSize: "12px", marginTop: "3px" }}>{session.faculty_name}</div>
-            </div>
-            <div>
-              <span className="form-label">Section</span>
-              <div style={{ fontWeight: 600, fontSize: "12px", marginTop: "3px" }}>{session.group_id}</div>
-            </div>
-            <div>
-              <span className="form-label">Assigned Room</span>
-              <div style={{ fontWeight: 600, fontSize: "12px", marginTop: "3px" }}>{session.room_name}</div>
-            </div>
-            <div>
-              <span className="form-label">Current Slot</span>
-              <div style={{ fontWeight: 600, fontSize: "12px", marginTop: "3px" }}>
-                {session.day}, {session.slot_label}
+        <form onSubmit={handleSave}>
+          <div className="modal-body">
+            {/* Quick in-place subject, teacher, section edit */}
+            <div style={{ background: "#f8f6f0", padding: "14px", borderRadius: "10px", display: "grid", gap: "10px" }}>
+              <div className="form-row">
+                <div className="form-group">
+                  <label className="form-label">Subject / Course Name</label>
+                  <input
+                    className="form-input"
+                    value={courseName}
+                    onChange={(e) => setCourseName(e.target.value)}
+                    required
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Class / Section</label>
+                  <input
+                    className="form-input"
+                    value={groupId}
+                    onChange={(e) => setGroupId(e.target.value)}
+                    placeholder="e.g. Class 10-A"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Assigned Teacher's Name</label>
+                <div style={{ display: "flex", gap: "8px" }}>
+                  <input
+                    className="form-input"
+                    value={teacherName}
+                    onChange={(e) => setTeacherName(e.target.value)}
+                    placeholder="Enter teacher name directly"
+                    style={{ flex: 1 }}
+                    required
+                  />
+                  <select
+                    className="form-select"
+                    style={{ maxWidth: "200px" }}
+                    value=""
+                    onChange={(e) => {
+                      if (e.target.value) setTeacherName(e.target.value);
+                    }}
+                  >
+                    <option value="">Or select teacher…</option>
+                    {facultyList.map((f) => (
+                      <option key={f.id} value={f.name}>
+                        {f.name} ({f.subject})
+                      </option>
+                    ))}
+                  </select>
+                </div>
               </div>
             </div>
-          </div>
 
-          {/* Pin/Lock action */}
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px", border: "1px solid var(--line-warm)", borderRadius: "8px" }}>
-            <div>
-              <strong>{session.is_locked ? "Pinned / Locked Session" : "Dynamic Session"}</strong>
-              <p style={{ margin: "2px 0 0", fontSize: "11px", color: "var(--ink-soft)" }}>
-                {session.is_locked
-                  ? "This session is anchored and will not move during re-optimisation."
-                  : "Allow optimizer to freely relocate this session for better fitness."}
-              </p>
-            </div>
-            <button
-              className={session.is_locked ? "btn-secondary" : "primary-button"}
-              onClick={onToggleLock}
-              style={{ minHeight: "34px" }}
+            {/* Pin/Lock action */}
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                padding: "12px",
+                border: "1px solid var(--line-warm)",
+                borderRadius: "8px",
+              }}
             >
-              {session.is_locked ? <Unlock size={14} /> : <Lock size={14} />}
-              {session.is_locked ? "Unlock" : "Lock in place"}
-            </button>
-          </div>
-
-          {/* Manual Reschedule Controls */}
-          <div style={{ border: "1px solid var(--line-warm)", borderRadius: "8px", padding: "12px" }}>
-            <span className="form-label">Manual Move / Reschedule</span>
-            <div className="form-row three" style={{ marginTop: "8px" }}>
               <div>
-                <label style={{ fontSize: "10px", color: "var(--ink-soft)" }}>Day</label>
-                <select
-                  className="form-select"
-                  value={newDay}
-                  onChange={(e) => setNewDay(e.target.value)}
-                >
-                  {days.map((d) => (
-                    <option key={d} value={d}>
-                      {d}
-                    </option>
-                  ))}
-                </select>
+                <strong>{session.is_locked ? "Pinned / Locked Slot" : "Dynamic Slot"}</strong>
+                <p style={{ margin: "2px 0 0", fontSize: "11px", color: "var(--ink-soft)" }}>
+                  {session.is_locked
+                    ? "This period is anchored and will not move during re-optimisation."
+                    : "Allow optimizer to freely relocate this period for optimal fit."}
+                </p>
               </div>
-
-              <div>
-                <label style={{ fontSize: "10px", color: "var(--ink-soft)" }}>Time</label>
-                <select
-                  className="form-select"
-                  value={newSlotId}
-                  onChange={(e) => setNewSlotId(e.target.value)}
-                >
-                  {slots.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label style={{ fontSize: "10px", color: "var(--ink-soft)" }}>Room</label>
-                <select
-                  className="form-select"
-                  value={newRoomId}
-                  onChange={(e) => setNewRoomId(e.target.value)}
-                >
-                  {rooms.map((r) => (
-                    <option key={r.id} value={r.id}>
-                      {r.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
+              <button
+                type="button"
+                className={session.is_locked ? "btn-secondary" : "primary-button"}
+                onClick={onToggleLock}
+                style={{ minHeight: "34px" }}
+              >
+                {session.is_locked ? <Unlock size={14} /> : <Lock size={14} />}
+                {session.is_locked ? "Unlock Slot" : "Lock in place"}
+              </button>
             </div>
 
-            {conflictWarning && (
-              <div
-                style={{
-                  marginTop: "10px",
-                  padding: "8px 10px",
-                  borderRadius: "6px",
-                  background: "#fdf2f2",
-                  color: "#d9534f",
-                  fontSize: "11px",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "6px",
-                }}
-              >
-                <AlertTriangle size={15} />
-                <span>{conflictWarning}</span>
-              </div>
-            )}
+            {/* Reschedule Controls */}
+            <div style={{ border: "1px solid var(--line-warm)", borderRadius: "8px", padding: "12px" }}>
+              <span className="form-label">Move to a different Day, Time, or Classroom</span>
+              <div className="form-row three" style={{ marginTop: "8px" }}>
+                <div>
+                  <label style={{ fontSize: "10px", color: "var(--ink-soft)" }}>Day</label>
+                  <select
+                    className="form-select"
+                    value={newDay}
+                    onChange={(e) => setNewDay(e.target.value)}
+                  >
+                    {days.map((d) => (
+                      <option key={d} value={d}>
+                        {d}
+                      </option>
+                    ))}
+                  </select>
+                </div>
 
-            <div style={{ marginTop: "12px", display: "flex", justifyContent: "flex-end" }}>
-              <button
-                className="btn-secondary"
-                disabled={!!conflictWarning || (newDay === session.day && newSlotId === session.slot_id && newRoomId === session.room_id)}
-                onClick={() => onReschedule(newDay, newSlotId, newRoomId)}
-              >
-                Move session
+                <div>
+                  <label style={{ fontSize: "10px", color: "var(--ink-soft)" }}>Time Slot</label>
+                  <select
+                    className="form-select"
+                    value={newSlotId}
+                    onChange={(e) => setNewSlotId(e.target.value)}
+                  >
+                    {slots.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label style={{ fontSize: "10px", color: "var(--ink-soft)" }}>Classroom / Room</label>
+                  <select
+                    className="form-select"
+                    value={newRoomId}
+                    onChange={(e) => setNewRoomId(e.target.value)}
+                  >
+                    {rooms.map((r) => (
+                      <option key={r.id} value={r.id}>
+                        {r.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {conflictWarning && (
+                <div
+                  style={{
+                    marginTop: "10px",
+                    padding: "8px 10px",
+                    borderRadius: "6px",
+                    background: "#fdf2f2",
+                    color: "#d9534f",
+                    fontSize: "11px",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "6px",
+                  }}
+                >
+                  <AlertTriangle size={15} />
+                  <span>{conflictWarning}</span>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="modal-footer" style={{ justifyContent: "space-between" }}>
+            <button
+              type="button"
+              className="btn-danger btn-sm"
+              onClick={onDelete}
+            >
+              <Trash2 size={13} /> Remove from timetable
+            </button>
+            <div style={{ display: "flex", gap: "8px" }}>
+              <button type="button" className="btn-secondary" onClick={onClose}>
+                Cancel
+              </button>
+              <button type="submit" className="primary-button" disabled={!!conflictWarning}>
+                Save changes
               </button>
             </div>
           </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// TIMETABLE WIZARD MODAL: Choose pre-made template or build custom timetable from scratch!
+function TimetableWizardModal({
+  currentInstName,
+  currentTermName,
+  onClose,
+  onApplyTemplate,
+  onCreateCustom,
+}: {
+  currentInstName: string;
+  currentTermName: string;
+  onClose: () => void;
+  onApplyTemplate: (t: TimetableTemplate) => void;
+  onCreateCustom: (data: {
+    institution: string;
+    term: string;
+    courses: Course[];
+    faculty: Faculty[];
+    rooms: Room[];
+  }) => void;
+}) {
+  const [tab, setTab] = useState<"templates" | "wizard">("templates");
+
+  // Wizard state
+  const [wizardInst, setWizardInst] = useState(currentInstName || "My Custom Academy");
+  const [wizardTerm, setWizardTerm] = useState(currentTermName || "Term 1");
+  const [className, setClassName] = useState("Class 10-A");
+
+  // Custom subjects & teachers list for rapid entry
+  const [subjectRows, setSubjectRows] = useState<
+    Array<{ id: string; subject: string; teacher: string; periods: number; isLab: boolean }>
+  >([
+    { id: "1", subject: "Mathematics", teacher: "Mr. Sharma", periods: 3, isLab: false },
+    { id: "2", subject: "Physics", teacher: "Ms. Verma", periods: 3, isLab: false },
+    { id: "3", subject: "Chemistry Lab", teacher: "Dr. Rao", periods: 1, isLab: true },
+    { id: "4", subject: "English", teacher: "Mrs. Das", periods: 3, isLab: false },
+    { id: "5", subject: "Biology", teacher: "Mr. Khan", periods: 2, isLab: false },
+  ]);
+
+  function handleAddSubjectRow() {
+    setSubjectRows([
+      ...subjectRows,
+      {
+        id: Date.now().toString(),
+        subject: "New Subject",
+        teacher: "Teacher Name",
+        periods: 2,
+        isLab: false,
+      },
+    ]);
+  }
+
+  function handleRemoveSubjectRow(id: string) {
+    if (subjectRows.length <= 1) return;
+    setSubjectRows(subjectRows.filter((r) => r.id !== id));
+  }
+
+  function handleCreateFromWizard() {
+    if (!wizardInst.trim() || !className.trim()) {
+      alert("Please enter institution name and class name.");
+      return;
+    }
+
+    // Build unique faculty from the teacher rows
+    const facultyMap = new Map<string, Faculty>();
+    const colorList: Course["color"][] = ["blue", "amber", "sage", "violet", "sand", "rose"];
+
+    const builtCourses: Course[] = [];
+
+    subjectRows.forEach((row, idx) => {
+      const cleanTeacher = row.teacher.trim() || `Teacher ${idx + 1}`;
+      let fId = cleanTeacher.toLowerCase().replace(/\s+/g, "-");
+
+      if (!facultyMap.has(fId)) {
+        const initials = cleanTeacher
+          .split(" ")
+          .map((w) => w[0])
+          .join("")
+          .toUpperCase()
+          .slice(0, 3);
+
+        facultyMap.set(fId, {
+          id: fId,
+          name: cleanTeacher,
+          initials: initials || "T",
+          subject: row.subject,
+          preferred_slots: [],
+          unavailable_slots: [],
+          max_daily_sessions: 4,
+          tone: (["blue", "amber", "sage", "rose", "violet"] as const)[idx % 5],
+        });
+      }
+
+      const cleanCode = row.subject.slice(0, 4).toUpperCase() + `-${idx + 1}`;
+      builtCourses.push({
+        id: cleanCode,
+        name: row.subject.trim() || "Subject",
+        faculty_id: fId,
+        group_id: className.trim(),
+        room_type: row.isLab ? "lab" : "lecture",
+        capacity: 45,
+        weekly_sessions: row.periods || 2,
+        duration_slots: row.isLab ? 2 : 1,
+        color: colorList[idx % colorList.length],
+      });
+    });
+
+    const builtRooms: Room[] = [
+      { id: "R-1", name: `${className} Classroom`, capacity: 50, room_type: "lecture", building: "Main Block" },
+      { id: "LAB-1", name: "Main Science / Computer Lab", capacity: 50, room_type: "lab", building: "Science Block" },
+      { id: "HALL-1", name: "Lecture Hall 2", capacity: 50, room_type: "lecture", building: "Main Block" },
+    ];
+
+    onCreateCustom({
+      institution: wizardInst.trim(),
+      term: wizardTerm.trim(),
+      faculty: Array.from(facultyMap.values()),
+      courses: builtCourses,
+      rooms: builtRooms,
+    });
+  }
+
+  return (
+    <div className="modal-backdrop">
+      <div className="modal-box large">
+        <div className="modal-header">
+          <h3>Custom Timetable & Templates</h3>
+          <button className="modal-close" onClick={onClose}>
+            <X size={20} />
+          </button>
         </div>
 
-        <div className="modal-footer" style={{ justifyContent: "space-between" }}>
-          <button className="btn-danger btn-sm" onClick={onDelete}>
-            <Trash2 size={13} /> Remove from schedule
+        {/* Tab switch */}
+        <div style={{ display: "flex", gap: "8px", padding: "12px 22px 0", borderBottom: "1px solid var(--line-warm)" }}>
+          <button
+            className={`view-mode-tab ${tab === "templates" ? "active" : ""}`}
+            onClick={() => setTab("templates")}
+          >
+            Pre-made Academic Templates
           </button>
-          <button className="btn-secondary" onClick={onClose}>
-            Close
+          <button
+            className={`view-mode-tab ${tab === "wizard" ? "active" : ""}`}
+            onClick={() => setTab("wizard")}
+          >
+            ⚡ Quick Setup Wizard (Build from Scratch)
           </button>
+        </div>
+
+        <div className="modal-body">
+          {tab === "templates" && (
+            <div>
+              <p style={{ margin: "0 0 14px", fontSize: "12px", color: "var(--ink-soft)" }}>
+                Select a ready-to-use template below. It will configure teachers, subjects, classrooms, and generate a clash-free schedule immediately.
+              </p>
+
+              <div className="template-grid">
+                {PRESET_TEMPLATES.map((tmpl) => (
+                  <div
+                    key={tmpl.id}
+                    className="template-card"
+                    onClick={() => onApplyTemplate(tmpl)}
+                  >
+                    <h4>{tmpl.name}</h4>
+                    <p style={{ fontWeight: 600, color: "var(--cobalt)", marginBottom: "4px" }}>
+                      {tmpl.institution} · {tmpl.term}
+                    </p>
+                    <p>{tmpl.description}</p>
+                    <div style={{ marginTop: "10px", display: "flex", gap: "6px" }}>
+                      <span className="quick-chip">{tmpl.courses.length} subjects</span>
+                      <span className="quick-chip">{tmpl.faculty.length} teachers</span>
+                      <span className="quick-chip">{tmpl.rooms.length} rooms</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {tab === "wizard" && (
+            <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+              <div className="form-row three">
+                <div className="form-group">
+                  <label className="form-label">School / College Name</label>
+                  <input
+                    className="form-input"
+                    value={wizardInst}
+                    onChange={(e) => setWizardInst(e.target.value)}
+                    placeholder="e.g. Springfield High"
+                    required
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Term / Year</label>
+                  <input
+                    className="form-input"
+                    value={wizardTerm}
+                    onChange={(e) => setWizardTerm(e.target.value)}
+                    placeholder="e.g. Session 2026-27"
+                    required
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Class / Section</label>
+                  <input
+                    className="form-input"
+                    value={className}
+                    onChange={(e) => setClassName(e.target.value)}
+                    placeholder="e.g. Class 10-A, Grade 9, Section B"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
+                  <span className="form-label">Subjects & Teachers for {className}</span>
+                  <button
+                    type="button"
+                    className="btn-secondary btn-sm"
+                    onClick={handleAddSubjectRow}
+                  >
+                    <Plus size={13} /> Add another subject
+                  </button>
+                </div>
+
+                <table className="wizard-table">
+                  <thead>
+                    <tr>
+                      <th>Subject Name</th>
+                      <th>Teacher / Faculty Name</th>
+                      <th>Weekly Periods</th>
+                      <th>Class Type</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {subjectRows.map((row) => (
+                      <tr key={row.id}>
+                        <td>
+                          <input
+                            className="form-input"
+                            style={{ height: "32px", fontSize: "12px" }}
+                            value={row.subject}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setSubjectRows((prev) =>
+                                prev.map((r) => (r.id === row.id ? { ...r, subject: val } : r)),
+                              );
+                            }}
+                            placeholder="e.g. Mathematics"
+                          />
+                        </td>
+                        <td>
+                          <input
+                            className="form-input"
+                            style={{ height: "32px", fontSize: "12px" }}
+                            value={row.teacher}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setSubjectRows((prev) =>
+                                prev.map((r) => (r.id === row.id ? { ...r, teacher: val } : r)),
+                              );
+                            }}
+                            placeholder="e.g. Mr. Sharma"
+                          />
+                        </td>
+                        <td>
+                          <input
+                            type="number"
+                            min="1"
+                            max="6"
+                            className="form-input"
+                            style={{ height: "32px", width: "60px", fontSize: "12px" }}
+                            value={row.periods}
+                            onChange={(e) => {
+                              const val = parseInt(e.target.value) || 1;
+                              setSubjectRows((prev) =>
+                                prev.map((r) => (r.id === row.id ? { ...r, periods: val } : r)),
+                              );
+                            }}
+                          />
+                        </td>
+                        <td>
+                          <select
+                            className="form-select"
+                            style={{ height: "32px", fontSize: "11px" }}
+                            value={row.isLab ? "lab" : "lecture"}
+                            onChange={(e) => {
+                              const isLab = e.target.value === "lab";
+                              setSubjectRows((prev) =>
+                                prev.map((r) => (r.id === row.id ? { ...r, isLab } : r)),
+                              );
+                            }}
+                          >
+                            <option value="lecture">Classroom</option>
+                            <option value="lab">Lab (2 hours)</option>
+                          </select>
+                        </td>
+                        <td>
+                          <button
+                            type="button"
+                            className="action-btn delete"
+                            style={{ width: "24px", height: "24px" }}
+                            onClick={() => handleRemoveSubjectRow(row.id)}
+                            title="Remove"
+                          >
+                            <Trash2 size={12} />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="modal-footer">
+          <button type="button" className="btn-secondary" onClick={onClose}>
+            Cancel
+          </button>
+          {tab === "wizard" && (
+            <button
+              type="button"
+              className="primary-button"
+              onClick={handleCreateFromWizard}
+            >
+              <WandSparkles size={16} /> Create & Generate Timetable
+            </button>
+          )}
         </div>
       </div>
     </div>
@@ -2608,18 +3201,18 @@ function DiagnosticsModal({
         <div className="modal-body">
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
             <div style={{ padding: "10px", background: "#f8f6f0", borderRadius: "8px" }}>
-              <span className="form-label">Session Slot Demand</span>
+              <span className="form-label">Period Demand</span>
               <strong style={{ display: "block", fontSize: "18px", marginTop: "4px" }}>
                 {result.required_slots} hours
               </strong>
-              <small style={{ color: "var(--ink-soft)" }}>Across {coursesCount} registered courses</small>
+              <small style={{ color: "var(--ink-soft)" }}>Across {coursesCount} subjects</small>
             </div>
             <div style={{ padding: "10px", background: "#f8f6f0", borderRadius: "8px" }}>
               <span className="form-label">Room Supply Capacity</span>
               <strong style={{ display: "block", fontSize: "18px", marginTop: "4px" }}>
                 {result.available_slots} slots
               </strong>
-              <small style={{ color: "var(--ink-soft)" }}>Across {roomsCount} active rooms</small>
+              <small style={{ color: "var(--ink-soft)" }}>Across {roomsCount} classrooms & labs</small>
             </div>
           </div>
 
@@ -2628,9 +3221,9 @@ function DiagnosticsModal({
               <div className="diag-issue-card success">
                 <CheckCircle2 size={18} />
                 <div>
-                  <strong>All Feasibility Checks Passed!</strong>
+                  <strong>Feasibility Checks Passed!</strong>
                   <p style={{ margin: "2px 0 0" }}>
-                    There are sufficient room slots, room type matches, and faculty capacity to generate a clash-free timetable.
+                    There are sufficient room slots, room type matches, and teacher availability to generate a clash-free schedule.
                   </p>
                 </div>
               </div>
@@ -2677,10 +3270,9 @@ function ImportCsvModal({
   onImport: () => void;
 }) {
   const sampleCsv = `code,name,faculty_id,group_id,room_type,capacity,weekly_sessions,duration_slots,color
-CS201,Data Structures,f1,CSE-A,lecture,60,3,1,blue
-CS251,Data Structures Lab,f4,CSE-A,lab,40,1,2,sage
-CS301,Algorithms,f3,CSE-B,lecture,58,3,1,blue
-CS302,Database Systems,f5,CSE-B,lecture,58,2,1,amber`;
+MATH,Mathematics,f1,Class 10-A,lecture,40,3,1,blue
+PHY,Physics Lab,f2,Class 10-A,lab,40,1,2,sage
+ENG,English,f3,Class 10-A,lecture,40,3,1,amber`;
 
   function fillSample() {
     onChangeText(sampleCsv);
@@ -2690,7 +3282,7 @@ CS302,Database Systems,f5,CSE-B,lecture,58,2,1,amber`;
     <div className="modal-backdrop">
       <div className="modal-box large">
         <div className="modal-header">
-          <h3>Import Courses from CSV</h3>
+          <h3>Import Subjects from CSV</h3>
           <button className="modal-close" onClick={onClose}>
             <X size={20} />
           </button>
@@ -2698,7 +3290,7 @@ CS302,Database Systems,f5,CSE-B,lecture,58,2,1,amber`;
 
         <div className="modal-body">
           <p style={{ margin: 0, fontSize: "12px", color: "var(--ink-soft)" }}>
-            Paste comma-separated course data below. Columns: <code>code, name, faculty_id, group_id, room_type, capacity, weekly_sessions, duration_slots, color</code>.
+            Paste comma-separated subject data below. Columns: <code>code, name, faculty_id, group_id, room_type, capacity, weekly_sessions, duration_slots, color</code>.
           </p>
 
           <textarea
@@ -2730,7 +3322,7 @@ CS302,Database Systems,f5,CSE-B,lecture,58,2,1,amber`;
             Cancel
           </button>
           <button className="primary-button" onClick={onImport} disabled={!csvText.trim()}>
-            Import Courses
+            Import Subjects
           </button>
         </div>
       </div>
@@ -2759,7 +3351,7 @@ function SettingsModal({
     <div className="modal-backdrop">
       <div className="modal-box">
         <div className="modal-header">
-          <h3>Settings & Genetic Algorithm Hyperparameters</h3>
+          <h3>Algorithm Settings & Hyperparameters</h3>
           <button className="modal-close" onClick={onClose}>
             <X size={20} />
           </button>
@@ -2779,7 +3371,7 @@ function SettingsModal({
               }
             />
             <small style={{ color: "var(--ink-soft)" }}>
-              Number of candidate schedules maintained across each generation.
+              Number of candidate timetables evaluated in parallel.
             </small>
           </div>
 
@@ -2796,7 +3388,7 @@ function SettingsModal({
               }
             />
             <small style={{ color: "var(--ink-soft)" }}>
-              Number of evolutionary iterations to discover low-penalty clash-free schedules.
+              Evolutionary iterations to optimize clashes and soft preferences.
             </small>
           </div>
 
@@ -2813,7 +3405,7 @@ function SettingsModal({
               }
             />
             <small style={{ color: "var(--ink-soft)" }}>
-              Fine-tuning neighborhood moves applied to the best chromosome.
+              Neighborhood moves applied to refine the best timetable.
             </small>
           </div>
 
@@ -2830,13 +3422,7 @@ function SettingsModal({
           </div>
 
           <div style={{ paddingTop: "8px", borderTop: "1px solid var(--line-warm)" }}>
-            <button
-              className="btn-danger btn-sm"
-              onClick={() => {
-                onResetDefaults();
-                onClose();
-              }}
-            >
+            <button className="btn-danger btn-sm" onClick={onResetDefaults}>
               <RotateCcw size={13} /> Reset All Data & Rules to Factory Default
             </button>
           </div>

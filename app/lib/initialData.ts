@@ -241,3 +241,115 @@ export const DEFAULT_CONFIG: OptimizerConfig = {
   tabu_iterations: 30,
   seed: 42,
 };
+
+// ---------------------------------------------------------------------------
+// PRESET TEMPLATES
+// ---------------------------------------------------------------------------
+
+export interface TimetableTemplate {
+  id: string;
+  name: string;
+  institution: string;
+  term: string;
+  description: string;
+  courses: Course[];
+  faculty: Faculty[];
+  rooms: Room[];
+}
+
+export const PRESET_TEMPLATES: TimetableTemplate[] = [
+  {
+    id: "engineering",
+    name: "Computer Science & Engineering",
+    institution: "Northbridge Institute of Technology",
+    term: "Odd Semester 2026",
+    description: "2 sections (CSE-A & CSE-B), labs, algorithms, data structures & databases.",
+    courses: DEFAULT_COURSES,
+    faculty: DEFAULT_FACULTY,
+    rooms: DEFAULT_ROOMS,
+  },
+  {
+    id: "high_school",
+    name: "High School (Classes 10-A & 10-B)",
+    institution: "St. Xavier's Model Senior Secondary School",
+    term: "Academic Session 2026-27",
+    description: "Classes 10-A & 10-B: Mathematics, Physics, Chemistry, English, Biology, History & Science Labs.",
+    faculty: [
+      { id: "hs-1", name: "Mr. Rajesh Sharma", initials: "RS", subject: "Mathematics", preferred_slots: ["08:00", "09:00", "10:15"], unavailable_slots: [], max_daily_sessions: 4, tone: "blue" },
+      { id: "hs-2", name: "Ms. Sunita Rao", initials: "SR", subject: "Physics", preferred_slots: ["09:00", "10:15", "11:15"], unavailable_slots: [], max_daily_sessions: 4, tone: "amber" },
+      { id: "hs-3", name: "Dr. Anita Sen", initials: "AS", subject: "Chemistry", preferred_slots: ["10:15", "11:15", "13:00"], unavailable_slots: [], max_daily_sessions: 3, tone: "sage" },
+      { id: "hs-4", name: "Mr. David Miller", initials: "DM", subject: "English Literature", preferred_slots: ["08:00", "11:15", "14:00"], unavailable_slots: [], max_daily_sessions: 4, tone: "violet" },
+      { id: "hs-5", name: "Dr. Priya Kapoor", initials: "PK", subject: "Biology", preferred_slots: ["10:15", "13:00", "14:00"], unavailable_slots: [], max_daily_sessions: 3, tone: "rose" },
+      { id: "hs-6", name: "Mr. Vikram Joshi", initials: "VJ", subject: "Social Science & History", preferred_slots: ["08:00", "09:00", "13:00"], unavailable_slots: [], max_daily_sessions: 4, tone: "sand" },
+    ],
+    rooms: [
+      { id: "R-101", name: "Classroom 10-A", capacity: 45, room_type: "lecture", building: "Senior Wing" },
+      { id: "R-102", name: "Classroom 10-B", capacity: 45, room_type: "lecture", building: "Senior Wing" },
+      { id: "SCI-LAB", name: "Science Lab", capacity: 40, room_type: "lab", building: "Science Block" },
+      { id: "COMP-LAB", name: "Computer Lab", capacity: 40, room_type: "lab", building: "Science Block" },
+    ],
+    courses: [
+      { id: "MATH-10A", name: "Mathematics", faculty_id: "hs-1", group_id: "Class 10-A", room_type: "lecture", capacity: 40, weekly_sessions: 3, duration_slots: 1, color: "blue" },
+      { id: "PHY-10A", name: "Physics", faculty_id: "hs-2", group_id: "Class 10-A", room_type: "lecture", capacity: 40, weekly_sessions: 2, duration_slots: 1, color: "amber" },
+      { id: "CHEM-10A", name: "Chemistry Lab", faculty_id: "hs-3", group_id: "Class 10-A", room_type: "lab", capacity: 35, weekly_sessions: 1, duration_slots: 2, color: "sage" },
+      { id: "ENG-10A", name: "English Literature", faculty_id: "hs-4", group_id: "Class 10-A", room_type: "lecture", capacity: 40, weekly_sessions: 3, duration_slots: 1, color: "violet" },
+      { id: "BIO-10A", name: "Biology", faculty_id: "hs-5", group_id: "Class 10-A", room_type: "lecture", capacity: 40, weekly_sessions: 2, duration_slots: 1, color: "rose" },
+      { id: "SST-10A", name: "Social Science", faculty_id: "hs-6", group_id: "Class 10-A", room_type: "lecture", capacity: 40, weekly_sessions: 2, duration_slots: 1, color: "sand" },
+
+      { id: "MATH-10B", name: "Mathematics", faculty_id: "hs-1", group_id: "Class 10-B", room_type: "lecture", capacity: 40, weekly_sessions: 3, duration_slots: 1, color: "blue" },
+      { id: "PHY-10B", name: "Physics", faculty_id: "hs-2", group_id: "Class 10-B", room_type: "lecture", capacity: 40, weekly_sessions: 2, duration_slots: 1, color: "amber" },
+      { id: "CHEM-10B", name: "Chemistry Lab", faculty_id: "hs-3", group_id: "Class 10-B", room_type: "lab", capacity: 35, weekly_sessions: 1, duration_slots: 2, color: "sage" },
+      { id: "ENG-10B", name: "English Literature", faculty_id: "hs-4", group_id: "Class 10-B", room_type: "lecture", capacity: 40, weekly_sessions: 3, duration_slots: 1, color: "violet" },
+      { id: "BIO-10B", name: "Biology", faculty_id: "hs-5", group_id: "Class 10-B", room_type: "lecture", capacity: 40, weekly_sessions: 2, duration_slots: 1, color: "rose" },
+      { id: "SST-10B", name: "Social Science", faculty_id: "hs-6", group_id: "Class 10-B", room_type: "lecture", capacity: 40, weekly_sessions: 2, duration_slots: 1, color: "sand" },
+    ],
+  },
+  {
+    id: "business_school",
+    name: "School of Business & Management",
+    institution: "Imperial Graduate School of Management",
+    term: "Term 2 - MBA Batch 2026",
+    description: "Sections MBA-1 & MBA-2: Accounting, Microeconomics, Business Law, Marketing & Statistics.",
+    faculty: [
+      { id: "mba-1", name: "Prof. Ramesh Gupta", initials: "RG", subject: "Financial Accounting", preferred_slots: ["08:00", "09:00"], unavailable_slots: [], max_daily_sessions: 3, tone: "blue" },
+      { id: "mba-2", name: "Dr. Meera Nambiar", initials: "MN", subject: "Microeconomics", preferred_slots: ["09:00", "10:15", "11:15"], unavailable_slots: [], max_daily_sessions: 3, tone: "amber" },
+      { id: "mba-3", name: "Prof. K. Subramanian", initials: "KS", subject: "Corporate Law", preferred_slots: ["11:15", "13:00"], unavailable_slots: [], max_daily_sessions: 3, tone: "sage" },
+      { id: "mba-4", name: "Dr. Shalini Roy", initials: "SR", subject: "Marketing Management", preferred_slots: ["10:15", "13:00", "14:00"], unavailable_slots: [], max_daily_sessions: 3, tone: "rose" },
+      { id: "mba-5", name: "Prof. Amit Saxena", initials: "AS", subject: "Business Analytics", preferred_slots: ["08:00", "14:00"], unavailable_slots: [], max_daily_sessions: 3, tone: "violet" },
+    ],
+    rooms: [
+      { id: "HALL-A", name: "Executive Hall A", capacity: 60, room_type: "lecture", building: "MBA Tower" },
+      { id: "HALL-B", name: "Executive Hall B", capacity: 60, room_type: "lecture", building: "MBA Tower" },
+      { id: "ANALYTICS-LAB", name: "Analytics Lab", capacity: 50, room_type: "lab", building: "MBA Tower" },
+    ],
+    courses: [
+      { id: "ACC-M1", name: "Financial Accounting", faculty_id: "mba-1", group_id: "MBA-1", room_type: "lecture", capacity: 50, weekly_sessions: 3, duration_slots: 1, color: "blue" },
+      { id: "ECO-M1", name: "Microeconomics", faculty_id: "mba-2", group_id: "MBA-1", room_type: "lecture", capacity: 50, weekly_sessions: 2, duration_slots: 1, color: "amber" },
+      { id: "LAW-M1", name: "Corporate Law", faculty_id: "mba-3", group_id: "MBA-1", room_type: "lecture", capacity: 50, weekly_sessions: 2, duration_slots: 1, color: "sage" },
+      { id: "MKT-M1", name: "Marketing Management", faculty_id: "mba-4", group_id: "MBA-1", room_type: "lecture", capacity: 50, weekly_sessions: 2, duration_slots: 1, color: "rose" },
+      { id: "ANL-M1", name: "Analytics & Statistics", faculty_id: "mba-5", group_id: "MBA-1", room_type: "lab", capacity: 45, weekly_sessions: 1, duration_slots: 2, color: "violet" },
+
+      { id: "ACC-M2", name: "Financial Accounting", faculty_id: "mba-1", group_id: "MBA-2", room_type: "lecture", capacity: 50, weekly_sessions: 3, duration_slots: 1, color: "blue" },
+      { id: "ECO-M2", name: "Microeconomics", faculty_id: "mba-2", group_id: "MBA-2", room_type: "lecture", capacity: 50, weekly_sessions: 2, duration_slots: 1, color: "amber" },
+      { id: "LAW-M2", name: "Corporate Law", faculty_id: "mba-3", group_id: "MBA-2", room_type: "lecture", capacity: 50, weekly_sessions: 2, duration_slots: 1, color: "sage" },
+      { id: "MKT-M2", name: "Marketing Management", faculty_id: "mba-4", group_id: "MBA-2", room_type: "lecture", capacity: 50, weekly_sessions: 2, duration_slots: 1, color: "rose" },
+      { id: "ANL-M2", name: "Analytics & Statistics", faculty_id: "mba-5", group_id: "MBA-2", room_type: "lab", capacity: 45, weekly_sessions: 1, duration_slots: 2, color: "violet" },
+    ],
+  },
+  {
+    id: "blank",
+    name: "Blank Canvas (100% Custom)",
+    institution: "My Custom Institution",
+    term: "Term 1",
+    description: "Start completely clean. Add your own teachers, subjects, classes and rooms.",
+    faculty: [
+      { id: "t1", name: "Teacher 1", initials: "T1", subject: "Subject 1", preferred_slots: [], unavailable_slots: [], max_daily_sessions: 4, tone: "blue" },
+    ],
+    rooms: [
+      { id: "Room-1", name: "Classroom 1", capacity: 50, room_type: "lecture", building: "Main Building" },
+    ],
+    courses: [
+      { id: "SUB-1", name: "Subject 1", faculty_id: "t1", group_id: "Section A", room_type: "lecture", capacity: 40, weekly_sessions: 2, duration_slots: 1, color: "blue" },
+    ],
+  },
+];
